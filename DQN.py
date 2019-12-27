@@ -71,7 +71,7 @@ class DQN:
         self.gamma = gamma
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.experience_replay_buffer = []
-        self.replay_buffer_max_size = 1e5
+        self.replay_buffer_max_size = 1e3
         self.cuda = cuda_flag
         self.log = logger()
         self.log.add_log('tot_return')
@@ -187,6 +187,40 @@ class DQN:
 
         return R, tot_return
 
+    def sample_from_buffer(self, batch_size, q_step):
+
+        _, _, Q_s1a = self.model(G, step=gcn_step)
+        _, _, Q_s2a = self.model(G, step=gcn_step)
+
+        # epsilon greedy strategy
+        if torch.rand(1) > self.eps:
+            best_action = Q_sa.argmax()
+        else:
+            best_action = torch.randint(high=self.n * self.n, size=(1,)).squeeze()
+        swap_i, swap_j = best_action / self.n, best_action - best_action / self.n * self.n
+        state, reward = self.problem.step((swap_i, swap_j))
+
+        sum_r += reward
+        q = Q_sa[best_action].unsqueeze(0)
+
+
+        ind = np.random.choice(range(len(self.experience_replay_buffer)), size=batch_size, replace=True)
+        ind_start = [i for i in ind if i % episode_len < episode_len - q_step]
+
+        t = self.experience_replay_buffer[ind_start[0]][0]
+        R = (self.experience_replay_buffer[ind_start[0]][1].unsqueeze(0)
+             - self.experience_replay_buffer[ind_start[0] + q_step][1].unsqueeze(0)) / (self.gamma ** t)
+        Q = self.experience_replay_buffer[ind_start[0]][2].unsqueeze(0)
+        - self.experience_replay_buffer[ind_start[0] + q_step][2].unsqueeze(0) / (self.gamma ** t)
+        for i in ind_start[1:]:
+            t = self.experience_replay_buffer[i][0]
+            r = (self.experience_replay_buffer[i][1] - self.experience_replay_buffer[i + q_step][1]) / (self.gamma ** t)
+            q = (self.experience_replay_buffer[i][2] - self.experience_replay_buffer[i + q_step][2]) / (self.gamma ** t)
+            R = torch.cat([R, r.unsqueeze(0)], dim=0)
+            Q = torch.cat([Q, q.unsqueeze(0)], dim=0)
+
+        return R, Q
+
     def update_model(self, R, Q):
         self.optimizer.zero_grad()
         if self.cuda:
@@ -235,8 +269,13 @@ class DQN:
             [_, tot_return] = self.run_episode_test_mem(gcn_step=gcn_step, episode_len=episode_len)
             mean_return = mean_return + tot_return
         # trim experience replay buffer
-        # self.trim_replay_buffer()
-        print(self.experience_replay_buffer.__len__())
+        self.trim_replay_buffer()
+
+        R, Q = self.sample_from_buffer(batch_size=batch_size, q_step=q_step)
+        self.update_model_dqn(R, Q)
+        del R, Q
+        torch.cuda.empty_cache()
+
         return self.log
 
     def train_dqn(self, batch_size=16, num_episodes=10, episode_len=50, gcn_step=10, q_step=1):
