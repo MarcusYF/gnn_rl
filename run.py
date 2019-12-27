@@ -24,11 +24,11 @@ alg = DQN(problem, gamma=0.9, eps=0.1, lr=.02, cuda_flag=True)
 
 
 @profile
-def run_dqn():
-    for i in range(15):
+def r
+    for i in range(50):
         T1 = time.time()
         # TODO memory usage :: episode_len * num_episodes * hidden_dim
-        log = alg.train_dqn(batch_size=16, num_episodes=1, episode_len=100, gcn_step=10, q_step=1)
+        log = alg.train_dqn(batch_size=128, num_episodes=1, episode_len=200, gcn_step=10, q_step=1)
         T2 = time.time()
         # print('Epoch: {}. T: {}'.format(i, np.round(T2-T1,3)))
         print('Epoch: {}. R: {}. TD error: {}. H: {}. T: {}'.format(i, np.round(log.get_current('tot_return'),2),np.round(log.get_current('TD_error'),3),np.round(log.get_current('entropy'),3),np.round(T2-T1,3)))

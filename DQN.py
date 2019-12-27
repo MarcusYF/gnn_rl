@@ -74,7 +74,7 @@ class DQN:
         self.gamma = gamma
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.experience_replay_buffer = []
-        self.replay_buffer_max_size = 1e3
+        self.replay_buffer_max_size = 100
         self.cuda = cuda_flag
         self.log = logger()
         self.log.add_log('tot_return')
