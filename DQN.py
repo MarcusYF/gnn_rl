@@ -125,6 +125,7 @@ class DQN:
     def sample_from_buffer(self, batch_size, q_step, gcn_step, episode_len):
 
         idx = np.random.choice(range(len(self.experience_replay_buffer) * episode_len), size=batch_size, replace=True)
+
         batch_idx = [(i // episode_len, i % episode_len) for i in idx]
 
         idx_start = [i for i in batch_idx if i[1] % episode_len < episode_len - q_step]
@@ -132,8 +133,13 @@ class DQN:
         t = 0
         for episode_i, step_j in idx_start:
 
-            G_start = to_cuda(self.experience_replay_buffer[episode_i].init_state)
-            G_end = to_cuda(self.experience_replay_buffer[episode_i].init_state)
+            if self.cuda:
+                G_start = to_cuda(self.experience_replay_buffer[episode_i].init_state)
+                G_end = to_cuda(self.experience_replay_buffer[episode_i].init_state)
+            else:
+                G_start = dc(to_cuda(self.experience_replay_buffer[episode_i].init_state))
+                G_end = dc(to_cuda(self.experience_replay_buffer[episode_i].init_state))
+
             G_start.ndata['label'] = G_start.ndata['label'][self.experience_replay_buffer[episode_i].label_perm[step_j], :]
             G_end.ndata['label'] = G_end.ndata['label'][self.experience_replay_buffer[episode_i].label_perm[step_j+q_step], :]
 
@@ -152,8 +158,8 @@ class DQN:
                 Q = q.unsqueeze(0)
             else:
                 R = torch.cat([R, r.unsqueeze(0)], dim=0)
-                Q = torch.cat([Q, r.unsqueeze(0)], dim=0)
-
+                Q = torch.cat([Q, q.unsqueeze(0)], dim=0)
+            t += 1
         return R, Q
 
 
@@ -181,9 +187,7 @@ class DQN:
         self.trim_replay_buffer()
 
         R, Q = self.sample_from_buffer(batch_size=batch_size, q_step=q_step, gcn_step=gcn_step, episode_len=episode_len)
-        print(R.shape)
-        print(Q.shape)
-        self.update_model_dqn(R, Q)
+        self.update_model(R, Q)
         del R, Q
         torch.cuda.empty_cache()
 
