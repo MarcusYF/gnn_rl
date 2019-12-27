@@ -18,12 +18,42 @@ import gc
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
-g = generate_G(k=3, m=5, adjacent_reserve=7, hidden_dim=6, a=1, sample=False)
-model = DQNet(k=3, m=5, ajr=7, num_head=4, hidden_dim=6)
-# iter GCN for fixed steps and forward dqn
-S_a_encoding, h, Q_sa = model(g['g'], step=10)
+# g = generate_G(k=3, m=5, adjacent_reserve=7, hidden_dim=6, a=1, sample=False)
+# model = DQNet(k=3, m=5, ajr=7, num_head=4, hidden_dim=6)
+# # iter GCN for fixed steps and forward dqn
+# S_a_encoding, h, Q_sa = model(g['g'], step=10)
+#
+# problem = KCut_DGL(k=5, m=6, adjacent_reserve=20, hidden_dim=16, random_init_label=True, a=1)
+#
+# alg = DQN(problem, gamma=0.9, eps=0.1, lr=.02, cuda_flag=True)
 
-@profile
+
+class EpisodeHistory:
+    def __init__(self, g, max_episode_len):
+        self.init_state = g
+        self.n = g.ndata['x'].shape[0]
+        self.max_episode_len = max_episode_len
+        self.episode_len = 0
+        self.action_seq = []
+        self.reward_seq = []
+        self.label_perm = torch.zeros((1, self.n))
+        self.label_perm[0, :] = torch.tensor(range(self.n))
+
+    def perm_label(self, label, action):
+        label = dc(label)
+        tmp = dc(label[action[0]])
+        label[action[0]] = label[action[1]]
+        label[action[1]] = tmp
+        return label.unsqueeze(0)
+
+    def write(self, action, reward):
+        self.action_seq.append(action)
+        self.reward_seq.append(reward)
+        self.label_perm = torch.cat([self.label_perm, self.perm_label(self.label_perm[-1, :], action)], dim=0)
+        self.episode_len += 1
+
+
+
 class DQN:
     def __init__(self, problem, gamma=1.0, eps=0.1, lr=1e-4, cuda_flag=True):
         self.problem = problem
@@ -41,7 +71,7 @@ class DQN:
         self.gamma = gamma
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.experience_replay_buffer = []
-        self.replay_buffer_max_size = 300
+        self.replay_buffer_max_size = 1e5
         self.cuda = cuda_flag
         self.log = logger()
         self.log.add_log('tot_return')
@@ -114,6 +144,49 @@ class DQN:
 
         return R, Q, A, tot_return
 
+    def run_episode_test_mem(self, gcn_step=10, episode_len=50):
+        sum_r = 0
+        state = self.problem.reset()
+        t = 0
+
+        ep = EpisodeHistory(state, episode_len)
+
+        while t < episode_len:
+            G = dc(state) # TODO might cause memory problem
+            if self.cuda:
+                G.ndata['x'] = G.ndata['x'].cuda()
+                G.ndata['label'] = G.ndata['label'].cuda()
+                G.ndata['h'] = G.ndata['h'].cuda()
+                G.edata['d'] = G.edata['d'].cuda()
+                G.edata['w'] = G.edata['w'].cuda()
+                G.edata['e_type'] = G.edata['e_type'].cuda()
+
+            S_a_encoding, h, Q_sa = self.model(G, step=gcn_step)
+
+            # epsilon greedy strategy
+            if torch.rand(1) > self.eps:
+                best_action = Q_sa.argmax()
+            else:
+                best_action = torch.randint(high=self.n*self.n, size=(1,)).squeeze()
+            swap_i, swap_j = best_action/self.n, best_action-best_action/self.n*self.n
+            state, reward = self.problem.step((swap_i, swap_j))
+
+            sum_r += reward
+
+            if t == 0:
+                R = reward.unsqueeze(0)
+            else:
+                R = torch.cat([R, reward.unsqueeze(0)], dim=0)
+
+            ep.write(action=(swap_i, swap_j), reward=R[-1])
+            t += 1
+
+        self.experience_replay_buffer.append(ep)
+        self.log.add_item('tot_return', sum_r.item())
+        tot_return = R.sum().item()
+
+        return R, tot_return
+
     def update_model(self, R, Q):
         self.optimizer.zero_grad()
         if self.cuda:
@@ -136,6 +209,8 @@ class DQN:
         self.optimizer.step()
         self.log.add_item('TD_error', L.detach().item())
         self.log.add_item('entropy', 0)
+        # del L
+        # torch.cuda.empty_cache()
 
 
     def train(self, num_episodes=10, episode_len=50, gcn_step=10):
@@ -152,6 +227,16 @@ class DQN:
 
         mean_return = mean_return / num_episodes
         self.update_model(R, Q)
+        return self.log
+
+    def train_dqn_test_mem(self, batch_size=16, num_episodes=10, episode_len=50, gcn_step=10, q_step=1):
+        mean_return = 0
+        for i in range(num_episodes):
+            [_, tot_return] = self.run_episode_test_mem(gcn_step=gcn_step, episode_len=episode_len)
+            mean_return = mean_return + tot_return
+        # trim experience replay buffer
+        # self.trim_replay_buffer()
+        print(self.experience_replay_buffer.__len__())
         return self.log
 
     def train_dqn(self, batch_size=16, num_episodes=10, episode_len=50, gcn_step=10, q_step=1):
@@ -179,6 +264,11 @@ class DQN:
 
         mean_return = mean_return / num_episodes
         self.update_model_dqn(R, Q)
+        print(Q.shape)
+        print(Q[0])
+        del Q
+        torch.cuda.empty_cache()
+        # 11457/10025
         return self.log
 
     def trim_replay_buffer(self):
