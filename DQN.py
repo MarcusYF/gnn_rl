@@ -59,25 +59,26 @@ class EpisodeHistory:
 
 class DQN:
     def __init__(self, problem, gamma=1.0, eps=0.1, lr=1e-4, replay_buffer_max_size = 10, cuda_flag=True):
+
         self.problem = problem
-        self.G = problem.g
-        self.k = problem.k
-        self.m = problem.m
-        self.ajr = problem.adjacent_reserve
-        self.hidden_dim = problem.hidden_dim
-        self.n = self.k * self.m
-        self.eps = eps
+        self.G = problem.g  # the graph
+        self.k = problem.k  # num of clusters
+        self.m = problem.m  # num of nodes in cluster
+        self.ajr = problem.adjacent_reserve  # degree of node in graph
+        self.hidden_dim = problem.hidden_dim  # hidden dimension for node representation
+        self.n = self.k * self.m  # num of nodes
+        self.eps = eps  # constant for exploration in dqn
         if cuda_flag:
             self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim).cuda()
         else:
             self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim)
-        self.gamma = gamma
+        self.gamma = gamma  # reward decay const
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.experience_replay_buffer = []
         self.replay_buffer_max_size = replay_buffer_max_size
         self.cuda = cuda_flag
         self.log = logger()
-        self.Q_err = 0
+        self.Q_err = 0  # Q error
         self.log.add_log('tot_return')
         self.log.add_log('Q_error')
         self.log.add_log('entropy')
