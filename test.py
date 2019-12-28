@@ -136,7 +136,6 @@ class KCut_DGL(nn.Module):
             return state, reward
 
 
-
 def udf_u_mul_e(edges):
     # a= edges.data['d'] * edges.data['e_type'][:, 0].unsqueeze(1)
     # print(a.view(15,14,1))

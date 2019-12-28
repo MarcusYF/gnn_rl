@@ -134,8 +134,10 @@ class DQN:
         idx_start = [i for i in batch_idx if i[1] % episode_len < episode_len - q_step]
 
         t = 0
+        R = []
+        Q = []
         for episode_i, step_j in idx_start:
-            # TODO should run in parallel and and avoid the for-loop (need to forward graph batches in dgl)
+            # TODO: should run in parallel and avoid the for-loop (need to forward graph batches in dgl)
 
             # calculate start/end states
             if self.cuda:
@@ -160,19 +162,21 @@ class DQN:
 
             # calculate diff between Q-values at start/end
             if not ddqn:
-                q = self.gamma ** q_step * Q_s2a[Q_s2a.argmax()]
+                q = self.gamma ** q_step * Q_s2a.max()
             else:
                 q = self.gamma ** q_step * Q_s2a[Q_s1a.argmax()]
             q -= Q_s1a[swap_i * G_start.number_of_nodes() + swap_j]
 
-            if t == 0:
-                R = r.unsqueeze(0)
-                Q = q.unsqueeze(0)
-            else:
-                R = torch.cat([R, r.unsqueeze(0)], dim=0)
-                Q = torch.cat([Q, q.unsqueeze(0)], dim=0)
+            R.append(r.unsqueeze(0))
+            Q.append(q.unsqueeze(0))
+            # if t == 0:
+            #     R = r.unsqueeze(0)
+            #     Q = q.unsqueeze(0)
+            # else:
+            #     R = torch.cat([R, r.unsqueeze(0)], dim=0)
+            #     Q = torch.cat([Q, q.unsqueeze(0)], dim=0)
             t += 1
-        return R, Q
+        return torch.cat(R), torch.cat(Q)
 
 
     def back_loss(self, R, Q, update_model=True):
