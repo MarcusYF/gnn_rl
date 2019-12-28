@@ -32,7 +32,7 @@ def to_cuda(G_):
 class EpisodeHistory:
     def __init__(self, g, max_episode_len):
         self.init_state = g
-        self.n = g.ndata['x'].shape[0]
+        self.n = g.number_of_nodes()
         self.max_episode_len = max_episode_len
         self.episode_len = 0
         self.action_seq = []
@@ -100,7 +100,7 @@ class DQN:
             if torch.rand(1) > self.eps:
                 best_action = Q_sa.argmax()
             else:
-                best_action = torch.randint(high=self.n*self.n, size=(1,)).squeeze()
+                best_action = torch.randint(high=self.n**2, size=(1,)).squeeze()
             swap_i, swap_j = best_action/self.n, best_action-best_action/self.n*self.n
             state, reward = self.problem.step((swap_i, swap_j))
 
@@ -122,17 +122,20 @@ class DQN:
 
         return R, tot_return
 
-    def sample_from_buffer(self, batch_size, q_step, gcn_step, episode_len):
+    def sample_from_buffer(self, batch_size, q_step, gcn_step, episode_len, ddqn):
 
+        # sample #batch_size indices in replay buffer
         idx = np.random.choice(range(len(self.experience_replay_buffer) * episode_len), size=batch_size, replace=True)
-
+        # locate samples in each episode
         batch_idx = [(i // episode_len, i % episode_len) for i in idx]
-
+        # locate start/end states for each sample
         idx_start = [i for i in batch_idx if i[1] % episode_len < episode_len - q_step]
 
         t = 0
         for episode_i, step_j in idx_start:
+            # TODO should run in parallel and and avoid the for-loop (need to forward graph batches in dgl)
 
+            # calculate start/end states
             if self.cuda:
                 G_start = to_cuda(self.experience_replay_buffer[episode_i].init_state)
                 G_end = to_cuda(self.experience_replay_buffer[episode_i].init_state)
@@ -143,15 +146,22 @@ class DQN:
             G_start.ndata['label'] = G_start.ndata['label'][self.experience_replay_buffer[episode_i].label_perm[step_j], :]
             G_end.ndata['label'] = G_end.ndata['label'][self.experience_replay_buffer[episode_i].label_perm[step_j+q_step], :]
 
+            # estimate Q-values
             _, _, Q_s1a = self.model(G_start, step=gcn_step)
             _, _, Q_s2a = self.model(G_end, step=gcn_step)
 
+            # calculate accumulated reword
             swap_i, swap_j = self.experience_replay_buffer[episode_i].action_seq[step_j]
-
-            q = Q_s2a[Q_s2a.argmax()] - Q_s1a[swap_i * G_start.number_of_nodes() + swap_j]
 
             r = self.experience_replay_buffer[episode_i].reward_seq[step_j: step_j + q_step]
             r = torch.sum(r * torch.tensor([self.gamma ** i for i in range(q_step)]))
+
+            # calculate diff between Q-values at start/end
+            if not ddqn:
+                q = self.gamma ** q_step * Q_s2a[Q_s2a.argmax()]
+            else:
+                q = self.gamma ** q_step * Q_s2a[Q_s1a.argmax()]
+            q -= Q_s1a[swap_i * G_start.number_of_nodes() + swap_j]
 
             if t == 0:
                 R = r.unsqueeze(0)
@@ -168,17 +178,22 @@ class DQN:
         self.optimizer.zero_grad()
         if self.cuda:
             R = R.cuda()
-            Q = Q.cuda()
         L = torch.pow(R + Q, 2).sum()
         L.backward(retain_graph=True)
         self.optimizer.step()
         self.log.add_item('TD_error', L.detach().item())
         self.log.add_item('entropy', 0)
-        # del L
-        # torch.cuda.empty_cache()
 
-
-    def train_dqn(self, batch_size=16, num_episodes=10, episode_len=50, gcn_step=10, q_step=1):
+    def train_dqn(self, batch_size=16, num_episodes=10, episode_len=50, gcn_step=10, q_step=1, ddqn=False):
+        """
+        :param batch_size:
+        :param num_episodes:
+        :param episode_len: #steps in each episode
+        :param gcn_step: #iters when running gcn
+        :param q_step: reward delay step
+        :param ddqn: train in ddqn mode
+        :return:
+        """
         mean_return = 0
         for i in range(num_episodes):
             [_, tot_return] = self.run_episode(gcn_step=gcn_step, episode_len=episode_len)
@@ -186,7 +201,7 @@ class DQN:
         # trim experience replay buffer
         self.trim_replay_buffer()
 
-        R, Q = self.sample_from_buffer(batch_size=batch_size, q_step=q_step, gcn_step=gcn_step, episode_len=episode_len)
+        R, Q = self.sample_from_buffer(batch_size=batch_size, q_step=q_step, gcn_step=gcn_step, episode_len=episode_len, ddqn=ddqn)
         self.update_model(R, Q)
         del R, Q
         torch.cuda.empty_cache()
