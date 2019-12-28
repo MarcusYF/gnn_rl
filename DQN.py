@@ -99,6 +99,20 @@ class DQN:
 
             S_a_encoding, h, Q_sa = self.model(G, step=gcn_step)
 
+            # record
+            h_support = h.nonzero().shape[0]
+            h_mean = h.sum() / h_support
+            h_residual = self.model.h_residual
+            q_mean = Q_sa.mean()
+            q_var = Q_sa.std()
+
+            if t % 100 == 0:
+                print(h_support)
+                print(h_mean)
+                print(h_residual)
+                print(q_mean)
+                print(q_var)
+
             # epsilon greedy strategy
             if torch.rand(1) > self.eps:
                 best_action = Q_sa.argmax()

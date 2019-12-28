@@ -272,6 +272,8 @@ class DQNet(nn.Module):
                            , dropout=0.1 \
                            , activate_linear=True)
 
+        self.h_residual = []
+
     def forward(self, g, step):
         n = self.n
         k = self.k
@@ -280,9 +282,12 @@ class DQNet(nn.Module):
         num_head = self.num_head
 
         h = g.ndata['h']
+        self.h_residual = []
         for i in range(step):
             for conv in self.layers:
-                h = conv(g, h)
+                h_new = conv(g, h)
+                self.h_residual.append(torch.norm(h_new-h).detach())
+                h = h_new
         g.ndata['h'] = h
 
         # compute centroid embedding c_i

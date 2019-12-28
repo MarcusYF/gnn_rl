@@ -9,7 +9,7 @@ import os
 import gc
 from tqdm import tqdm
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 problem = KCut_DGL(k=5, m=6, adjacent_reserve=20, hidden_dim=16, random_init_label=True, a=1)
 alg = DQN(problem, gamma=0.9, eps=0.1, lr=.02, replay_buffer_max_size=10, cuda_flag=True)
 
@@ -17,7 +17,7 @@ def run_dqn():
     for i in tqdm(range(100)):
         T1 = time.time()
         # TODO memory usage :: episode_len * num_episodes * hidden_dim
-        log = alg.train_dqn(batch_size=128, grad_accum=10, num_episodes=1, episode_len=500, gcn_step=10, q_step=1, ddqn=False)
+        log = alg.train_dqn(batch_size=64, grad_accum=10, num_episodes=1, episode_len=500, gcn_step=10, q_step=1, ddqn=False)
         if i % 3 == 0:
             alg.update_target_net()
         T2 = time.time()
