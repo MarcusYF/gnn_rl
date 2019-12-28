@@ -58,7 +58,7 @@ class EpisodeHistory:
 
 
 class DQN:
-    def __init__(self, problem, gamma=1.0, eps=0.1, lr=1e-4, cuda_flag=True):
+    def __init__(self, problem, gamma=1.0, eps=0.1, lr=1e-4, replay_buffer_max_size = 10, cuda_flag=True):
         self.problem = problem
         self.G = problem.g
         self.k = problem.k
@@ -74,11 +74,12 @@ class DQN:
         self.gamma = gamma
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.experience_replay_buffer = []
-        self.replay_buffer_max_size = 100
+        self.replay_buffer_max_size = replay_buffer_max_size
         self.cuda = cuda_flag
         self.log = logger()
+        self.Q_err = 0
         self.log.add_log('tot_return')
-        self.log.add_log('TD_error')
+        self.log.add_log('Q_error')
         self.log.add_log('entropy')
 
     def run_episode(self, gcn_step=10, episode_len=50):
@@ -173,16 +174,19 @@ class DQN:
         return R, Q
 
 
-    def update_model(self, R, Q):
+    def back_loss(self, R, Q, update_model=True):
         print('actual batch size:', R.shape.numel())
-        self.optimizer.zero_grad()
         if self.cuda:
             R = R.cuda()
         L = torch.pow(R + Q, 2).sum()
         L.backward(retain_graph=True)
-        self.optimizer.step()
-        self.log.add_item('TD_error', L.detach().item())
-        self.log.add_item('entropy', 0)
+        self.Q_err += L.detach().item()
+        if update_model:
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+            self.log.add_item('Q_error', self.Q_err)
+            self.Q_err = 0
+            self.log.add_item('entropy', 0)
 
     def train_dqn(self, batch_size=16, num_episodes=10, episode_len=50, gcn_step=10, q_step=1, ddqn=False):
         """
@@ -201,10 +205,11 @@ class DQN:
         # trim experience replay buffer
         self.trim_replay_buffer()
 
-        R, Q = self.sample_from_buffer(batch_size=batch_size, q_step=q_step, gcn_step=gcn_step, episode_len=episode_len, ddqn=ddqn)
-        self.update_model(R, Q)
-        del R, Q
-        torch.cuda.empty_cache()
+        for i in range(10):
+            R, Q = self.sample_from_buffer(batch_size=batch_size, q_step=q_step, gcn_step=gcn_step, episode_len=episode_len, ddqn=ddqn)
+            self.back_loss(R, Q, update_model=(i % 10 == 9))
+            del R, Q
+            torch.cuda.empty_cache()
 
         return self.log
 
