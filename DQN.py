@@ -9,6 +9,7 @@ import numpy as np
 import dgl
 import torch.nn.functional as F
 from copy import deepcopy as dc
+import pickle
 import os
 from test import *
 from log_utils import mean_val, logger
@@ -205,7 +206,7 @@ class DQN:
         # trim experience replay buffer
         self.trim_replay_buffer()
 
-        for i in range(10):
+        for i in range(grad_accum):
             R, Q = self.sample_from_buffer(batch_size=batch_size, q_step=q_step, gcn_step=gcn_step, episode_len=episode_len, ddqn=ddqn)
             self.back_loss(R, Q, update_model=(i % grad_accum == grad_accum - 1))
             del R, Q
@@ -218,5 +219,5 @@ class DQN:
             self.experience_replay_buffer = self.experience_replay_buffer[-self.replay_buffer_max_size:]
 
     def update_target_net(self):
-        self.model_target = dc(self.model)
+        self.model_target = pickle.loads(pickle.dumps(self.model))
 

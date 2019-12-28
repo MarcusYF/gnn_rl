@@ -17,7 +17,7 @@ def run_dqn():
     for i in tqdm(range(100)):
         T1 = time.time()
         # TODO memory usage :: episode_len * num_episodes * hidden_dim
-        log = alg.train_dqn(batch_size=128, grad_accum=10, num_episodes=1, episode_len=500, gcn_step=10, q_step=2, ddqn=False)
+        log = alg.train_dqn(batch_size=128, grad_accum=10, num_episodes=1, episode_len=500, gcn_step=10, q_step=1, ddqn=False)
         if i % 3 == 0:
             alg.update_target_net()
         T2 = time.time()

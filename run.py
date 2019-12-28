@@ -26,11 +26,13 @@ parser.add_argument('--eps', type=float, default=0.1, help="")
 parser.add_argument('--lr', type=float, default=0.02, help="learning rate")
 parser.add_argument('--replay_buffer_size', default=10, help="")
 parser.add_argument('--batch_size', default=128, help='')
+parser.add_argument('--grad_accum', default=10, help='')
 parser.add_argument('--num_episode', default=1, help='')
 parser.add_argument('--episode_len', default=500, help='')
 parser.add_argument('--gcn_step', default=10, help='')
 parser.add_argument('--q_step', default=1)
 parser.add_argument('--num_epoch', default=50)
+parser.add_argument('--target_update_step', default=5)
 parser.add_argument('--ddqn', default=True)
 args = vars(parser.parse_args())
 
@@ -44,12 +46,14 @@ gamma = float(args['gamma'])
 eps = float(args['eps'])
 lr = args['lr']    # learning rate
 replay_buffer_size = int(args['replay_buffer_size'])
-B = int(args['batch_size'])    # batch_size
+B = int(args['batch_size'])
+grad_accum = int(args['grad_accum'])
 n_episode = int(args['num_episode'])
 episode_len = int(args['episode_len'])
 gcn_step = int(args['gcn_step'])
 q_step = int(args['q_step'])
 n_epoch = int(args['num_epoch'])
+target_update_step = int(args['target_update_step'])
 ddqn = bool(args['ddqn'])
 
 
@@ -64,9 +68,10 @@ def run_dqn():
     for i in tqdm(range(n_epoch)):
         T1 = time.time()
         # TODO memory usage :: episode_len * num_episodes * hidden_dim
-        log = alg.train_dqn(batch_size=B, num_episodes=n_episode, episode_len=episode_len, gcn_step=gcn_step, q_step=q_step, ddqn=ddqn)
+        log = alg.train_dqn(batch_size=B, grad_accum=grad_accum, num_episodes=n_episode, episode_len=episode_len, gcn_step=gcn_step, q_step=q_step, ddqn=ddqn)
+        if i % target_update_step == target_update_step - 1:
+            alg.update_target_net()
         T2 = time.time()
-        # print('Epoch: {}. T: {}'.format(i, np.round(T2-T1,3)))
         print('Epoch: {}. R: {}. Q error: {}. H: {}. T: {}'.format(i, np.round(log.get_current('tot_return'),2),np.round(log.get_current('Q_error'),3),np.round(log.get_current('entropy'),3),np.round(T2-T1,3)))
 
 
