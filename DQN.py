@@ -11,9 +11,8 @@ import torch.nn.functional as F
 from copy import deepcopy as dc
 import os
 from test import *
-from Utils import stack_indices, stack_list_indices, max_graph_array
 from log_utils import mean_val, logger
-import gc
+
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
@@ -58,7 +57,7 @@ class EpisodeHistory:
 
 
 class DQN:
-    def __init__(self, problem, gamma=1.0, eps=0.1, lr=1e-4, replay_buffer_max_size = 10, cuda_flag=True):
+    def __init__(self, problem, gamma=1.0, eps=0.1, lr=1e-4, replay_buffer_max_size=10, cuda_flag=True):
 
         self.problem = problem
         self.G = problem.g  # the graph
@@ -72,6 +71,7 @@ class DQN:
             self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim).cuda()
         else:
             self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim)
+        self.model_target = dc(self.model)
         self.gamma = gamma  # reward decay const
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.experience_replay_buffer = []
@@ -152,7 +152,7 @@ class DQN:
 
             # estimate Q-values
             _, _, Q_s1a = self.model(G_start, step=gcn_step)
-            _, _, Q_s2a = self.model(G_end, step=gcn_step)
+            _, _, Q_s2a = self.model_target(G_end, step=gcn_step)
 
             # calculate accumulated reword
             swap_i, swap_j = self.experience_replay_buffer[episode_i].action_seq[step_j]
@@ -169,12 +169,7 @@ class DQN:
 
             R.append(r.unsqueeze(0))
             Q.append(q.unsqueeze(0))
-            # if t == 0:
-            #     R = r.unsqueeze(0)
-            #     Q = q.unsqueeze(0)
-            # else:
-            #     R = torch.cat([R, r.unsqueeze(0)], dim=0)
-            #     Q = torch.cat([Q, q.unsqueeze(0)], dim=0)
+
             t += 1
         return torch.cat(R), torch.cat(Q)
 
@@ -193,7 +188,7 @@ class DQN:
             self.Q_err = 0
             self.log.add_item('entropy', 0)
 
-    def train_dqn(self, batch_size=16, num_episodes=10, episode_len=50, gcn_step=10, q_step=1, ddqn=False):
+    def train_dqn(self, batch_size=16, grad_accum=10, num_episodes=10, episode_len=50, gcn_step=10, q_step=1, ddqn=False):
         """
         :param batch_size:
         :param num_episodes:
@@ -212,7 +207,7 @@ class DQN:
 
         for i in range(10):
             R, Q = self.sample_from_buffer(batch_size=batch_size, q_step=q_step, gcn_step=gcn_step, episode_len=episode_len, ddqn=ddqn)
-            self.back_loss(R, Q, update_model=(i % 10 == 9))
+            self.back_loss(R, Q, update_model=(i % grad_accum == grad_accum - 1))
             del R, Q
             torch.cuda.empty_cache()
 
@@ -221,4 +216,7 @@ class DQN:
     def trim_replay_buffer(self):
         if len(self.experience_replay_buffer) > self.replay_buffer_max_size:
             self.experience_replay_buffer = self.experience_replay_buffer[-self.replay_buffer_max_size:]
+
+    def update_target_net(self):
+        self.model_target = dc(self.model)
 

@@ -67,7 +67,7 @@ def generate_G(k, m, adjacent_reserve, hidden_dim, random_init_label=False, a=1,
     return G
 
 
-class KCut_DGL(nn.Module):
+class KCut_DGL():
 
     def __init__(self, k, m, adjacent_reserve, hidden_dim, random_init_label=False, a=1):
         self.g = generate_G(k, m, adjacent_reserve, hidden_dim, random_init_label=random_init_label, a=a, sample=False)['g']
@@ -322,7 +322,7 @@ class DQNet(nn.Module):
         return S_a_encoding, h, Q_sa.squeeze()
 
 
-g = generate_G(k=3, m=5, adjacent_reserve=7, hidden_dim=6, a=1, sample=True)
+g = generate_G(k=3, m=5, adjacent_reserve=7, hidden_dim=6, a=1, sample=False)
 dqn = DQNet(k=3, m=5, ajr=7, num_head=4, hidden_dim=6)
 # iter GCN for fixed steps and forward dqn
 S_a_encoding, h, Q_sa = dqn(g['g'], step=10)
