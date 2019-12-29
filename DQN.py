@@ -107,11 +107,11 @@ class DQN:
             q_var = Q_sa.std()
 
             if t % 100 == 0:
-                print(h_support)
-                print(h_mean)
-                print(h_residual)
-                print(q_mean)
-                print(q_var)
+                print('h-nonzero entry: ', h_support)
+                print('h-mean: ', h_mean.detach().item())
+                print('h-std: ', [x.item() for x in h_residual])
+                print('q value-mean: ', q_mean.detach().item())
+                print('q value-std: ', q_var.detach().item())
 
             # epsilon greedy strategy
             if torch.rand(1) > self.eps:
