@@ -107,10 +107,10 @@ class DQN:
             q_var = Q_sa.std()
             if t % 100 == 0:
                 print('h-nonzero entry: %.0f'%h_support)
-                print('h-mean: %.2f'%h_mean.detach().item())
+                print('h-mean: %.5f'%h_mean.detach().item())
                 print('h-std: ', ['%.2f'%x.item() for x in h_residual])
-                print('q value-mean: %.2f'%q_mean.detach().item())
-                print('q value-std: %.2f'%q_var.detach().item())
+                print('q value-mean: %.5f'%q_mean.detach().item())
+                print('q value-std: %.5f'%q_var.detach().item())
 
             # epsilon greedy strategy
             if torch.rand(1) > self.eps:
@@ -118,6 +118,8 @@ class DQN:
             else:
                 best_action = torch.randint(high=self.n**2, size=(1,)).squeeze()
             swap_i, swap_j = best_action/self.n, best_action-best_action/self.n*self.n
+
+            # TODO: Re-design reward signal? What about the terminal state?
             state, reward = self.problem.step((swap_i, swap_j))
 
             sum_r += reward
@@ -173,6 +175,7 @@ class DQN:
 
             r = self.experience_replay_buffer[episode_i].reward_seq[step_j: step_j + q_step]
             r = torch.sum(r * torch.tensor([self.gamma ** i for i in range(q_step)]))
+            r -= q_step # episode len penalty
 
             # calculate diff between Q-values at start/end
             if not ddqn:

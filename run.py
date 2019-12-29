@@ -67,7 +67,6 @@ alg = DQN(problem, gamma=gamma, eps=eps, lr=lr, replay_buffer_max_size=replay_bu
 def run_dqn():
     for i in tqdm(range(n_epoch)):
         T1 = time.time()
-        # TODO memory usage :: episode_len * num_episodes * hidden_dim
         log = alg.train_dqn(batch_size=B, grad_accum=grad_accum, num_episodes=n_episode, episode_len=episode_len, gcn_step=gcn_step, q_step=q_step, ddqn=ddqn)
         if i % target_update_step == target_update_step - 1:
             alg.update_target_net()
