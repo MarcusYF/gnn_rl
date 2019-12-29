@@ -105,13 +105,12 @@ class DQN:
             h_residual = self.model.h_residual
             q_mean = Q_sa.mean()
             q_var = Q_sa.std()
-
             if t % 100 == 0:
-                print('h-nonzero entry: ', h_support)
-                print('h-mean: ', h_mean.detach().item())
-                print('h-std: ', [x.item() for x in h_residual])
-                print('q value-mean: ', q_mean.detach().item())
-                print('q value-std: ', q_var.detach().item())
+                print('h-nonzero entry: %.0f'%h_support)
+                print('h-mean: %.2f'%h_mean.detach().item())
+                print('h-std: ', ['%.2f'%x.item() for x in h_residual])
+                print('q value-mean: %.2f'%q_mean.detach().item())
+                print('q value-std: %.2f'%q_var.detach().item())
 
             # epsilon greedy strategy
             if torch.rand(1) > self.eps:
