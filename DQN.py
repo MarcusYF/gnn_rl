@@ -175,7 +175,6 @@ class DQN:
 
             r = self.experience_replay_buffer[episode_i].reward_seq[step_j: step_j + q_step]
             r = torch.sum(r * torch.tensor([self.gamma ** i for i in range(q_step)]))
-            r -= q_step # episode len penalty
 
             # calculate diff between Q-values at start/end
             if not ddqn:
