@@ -353,7 +353,7 @@ class DQNet(nn.Module):
         # PI = self.policy(g.ndata['h'])
         Q_sa = self.value2(F.relu(self.value1(S_a_encoding)))
         # g.ndata.pop('h')
-        return S_a_encoding, h, Q_sa.squeeze()
+        return S_a_encoding, h, g.ndata['h'], Q_sa.squeeze()
 
 
 # g = generate_G(k=3, m=5, adjacent_reserve=7, hidden_dim=6, a=1, sample=False)

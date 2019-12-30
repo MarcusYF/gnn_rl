@@ -57,6 +57,36 @@ class EpisodeHistory:
         self.label_perm = self.label_perm.long()
 
 
+def weight_monitor(model, model_target):
+    gnn_0 = torch.mean(model.layers[0].apply_mod.l0.weight).item(), torch.std(model.layers[0].apply_mod.l0.weight).item()
+    gnn_1 = torch.mean(model.layers[0].apply_mod.l1.weight).item(), torch.std(model.layers[0].apply_mod.l1.weight).item()
+    gnn_2 = torch.mean(model.layers[0].apply_mod.l2.weight).item(), torch.std(model.layers[0].apply_mod.l2.weight).item()
+    gnn_3 = torch.mean(model.layers[0].apply_mod.l3.weight).item(), torch.std(model.layers[0].apply_mod.l3.weight).item()
+    gnn_4 = torch.mean(model.layers[0].apply_mod.l4.weight).item(), torch.std(model.layers[0].apply_mod.l4.weight).item()
+    gnn_5 = torch.mean(model.layers[0].apply_mod.l5.weight).item(), torch.std(model.layers[0].apply_mod.l5.weight).item()
+    attn = [(torch.mean(model.MHA.linears[i].weight).item(), torch.std(model.MHA.linears[i].weight).item()) for i in range(4)]
+    q_net_1 = torch.mean(model.value1.weight).item(), torch.std(model.value1.weight).item()
+    q_net_2 = torch.mean(model.value2.weight).item(), torch.std(model.value2.weight).item()
+    gnn_diff0 = torch.norm(model.layers[0].apply_mod.l0.weight - model_target.layers[0].apply_mod.l0.weight).item()
+    gnn_diff1 = torch.norm(model.layers[0].apply_mod.l1.weight - model_target.layers[0].apply_mod.l1.weight).item()
+    gnn_diff2 = torch.norm(model.layers[0].apply_mod.l2.weight - model_target.layers[0].apply_mod.l2.weight).item()
+    gnn_diff3 = torch.norm(model.layers[0].apply_mod.l3.weight - model_target.layers[0].apply_mod.l3.weight).item()
+    gnn_diff4 = torch.norm(model.layers[0].apply_mod.l4.weight - model_target.layers[0].apply_mod.l4.weight).item()
+    gnn_diff5 = torch.norm(model.layers[0].apply_mod.l5.weight - model_target.layers[0].apply_mod.l5.weight).item()
+    attn_diff0 = torch.norm(model.MHA.linears[0].weight - model_target.MHA.linears[0].weight).item()
+    attn_diff1 = torch.norm(model.MHA.linears[1].weight - model_target.MHA.linears[1].weight).item()
+    attn_diff2 = torch.norm(model.MHA.linears[2].weight - model_target.MHA.linears[2].weight).item()
+    attn_diff3 = torch.norm(model.MHA.linears[3].weight - model_target.MHA.linears[3].weight).item()
+    q_net_diff1 = torch.norm(model.value1.weight - model_target.value1.weight).item()
+    q_net_diff2 = torch.norm(model.value2.weight - model_target.value2.weight).item()
+
+    return {'gnn0':gnn_0, 'gnn1':gnn_1, 'gnn2':gnn_2, 'gnn3':gnn_3, 'gnn4':gnn_4, 'gnn5':gnn_5,
+            'attn':attn, 'q_net1':q_net_1, 'q_net2':q_net_2, 'gnn_diff0':gnn_diff0,
+            'gnn_diff1':gnn_diff1, 'gnn_diff2':gnn_diff2, 'gnn_diff3':gnn_diff3, 'gnn_diff4':gnn_diff4, 'gnn_diff5':gnn_diff5,
+            'attn_diff0':attn_diff0, 'attn_diff1':attn_diff1, 'attn_diff2':attn_diff2, 'attn_diff3':attn_diff3,
+            'q_net_diff1':q_net_diff1, 'q_net_diff2':q_net_diff2}
+
+
 class DQN:
     def __init__(self, problem, gamma=1.0, eps=0.1, lr=1e-4, replay_buffer_max_size=10, cuda_flag=True):
 
@@ -84,7 +114,7 @@ class DQN:
         self.log.add_log('Q_error')
         self.log.add_log('entropy')
 
-    def run_episode(self, gcn_step=10, episode_len=50):
+    def run_episode(self, gnn_step=10, episode_len=50):
         sum_r = 0
         state = self.problem.reset()
         t = 0
@@ -97,20 +127,24 @@ class DQN:
             else:
                 G = dc(state)
 
-            S_a_encoding, h, Q_sa = self.model(G, gnn_step=gcn_step, max_step=episode_len, remain_step=episode_len-1-t)
+            S_a_encoding, h1, h2, Q_sa = self.model(G, gnn_step=gnn_step, max_step=episode_len, remain_step=episode_len-1-t)
 
             # record
-            h_support = h.nonzero().shape[0]
-            h_mean = h.sum() / h_support
+            h_support1 = h1.nonzero().shape[0]
+            h_support2 = h2.nonzero().shape[0]
+            h_mean = h1.sum() / h_support1
             h_residual = self.model.h_residual
             q_mean = Q_sa.mean()
             q_var = Q_sa.std()
-            if t % 100 == 0:
-                print('h-nonzero entry: %.0f'%h_support)
-                print('h-mean: %.5f'%h_mean.detach().item())
+            # model weight
+
+            if t % episode_len in (0, episode_len//2, episode_len-1):
+                print('\nh-nonzero entry: %.0f, %.0f'%(h_support1, h_support2))
+                print('h-mean: %.5f'%h_mean.item())
                 print('h-std: ', ['%.2f'%x.item() for x in h_residual])
-                print('q value-mean: %.5f'%q_mean.detach().item())
-                print('q value-std: %.5f'%q_var.detach().item())
+                print('q value-mean: %.5f'%q_mean.item())
+                print('q value-std: %.5f'%q_var.item())
+                print(weight_monitor(self.model, self.model_target))
 
             # epsilon greedy strategy
             if torch.rand(1) > self.eps:
@@ -140,7 +174,7 @@ class DQN:
 
         return R, tot_return
 
-    def sample_from_buffer(self, batch_size, q_step, gcn_step, episode_len, ddqn):
+    def sample_from_buffer(self, batch_size, q_step, gnn_step, episode_len, ddqn):
 
         # sample #batch_size indices in replay buffer
         idx = np.random.choice(range(len(self.experience_replay_buffer) * episode_len), size=batch_size, replace=True)
@@ -167,8 +201,8 @@ class DQN:
             G_end.ndata['label'] = G_end.ndata['label'][self.experience_replay_buffer[episode_i].label_perm[step_j+q_step], :]
 
             # estimate Q-values
-            _, _, Q_s1a = self.model(G_start, gnn_step=gcn_step, max_step=episode_len, remain_step=episode_len-1-step_j)
-            _, _, Q_s2a = self.model_target(G_end, gnn_step=gcn_step, max_step=episode_len, remain_step=episode_len-1-step_j-q_step)
+            _, _, _, Q_s1a = self.model(G_start, gnn_step=gnn_step, max_step=episode_len, remain_step=episode_len-1-step_j)
+            _, _, _, Q_s2a = self.model_target(G_end, gnn_step=gnn_step, max_step=episode_len, remain_step=episode_len-1-step_j-q_step)
 
             # calculate accumulated reword
             swap_i, swap_j = self.experience_replay_buffer[episode_i].action_seq[step_j]
@@ -199,7 +233,7 @@ class DQN:
             R = R.cuda()
         L = torch.pow(R + Q, 2).sum()
         L.backward(retain_graph=True)
-        self.Q_err += L.detach().item()
+        self.Q_err += L.item()
         if update_model:
             self.optimizer.step()
             self.optimizer.zero_grad()
@@ -207,25 +241,25 @@ class DQN:
             self.Q_err = 0
             self.log.add_item('entropy', 0)
 
-    def train_dqn(self, batch_size=16, grad_accum=10, num_episodes=10, episode_len=50, gcn_step=10, q_step=1, ddqn=False):
+    def train_dqn(self, batch_size=16, grad_accum=10, num_episodes=10, episode_len=50, gnn_step=10, q_step=1, ddqn=False):
         """
         :param batch_size:
         :param num_episodes:
         :param episode_len: #steps in each episode
-        :param gcn_step: #iters when running gcn
+        :param gnn_step: #iters when running gnn
         :param q_step: reward delay step
         :param ddqn: train in ddqn mode
         :return:
         """
         mean_return = 0
         for i in range(num_episodes):
-            [_, tot_return] = self.run_episode(gcn_step=gcn_step, episode_len=episode_len)
+            [_, tot_return] = self.run_episode(gnn_step=gnn_step, episode_len=episode_len)
             mean_return = mean_return + tot_return
         # trim experience replay buffer
         self.trim_replay_buffer()
 
         for i in range(grad_accum):
-            R, Q = self.sample_from_buffer(batch_size=batch_size, q_step=q_step, gcn_step=gcn_step, episode_len=episode_len, ddqn=ddqn)
+            R, Q = self.sample_from_buffer(batch_size=batch_size, q_step=q_step, gnn_step=gnn_step, episode_len=episode_len, ddqn=ddqn)
             self.back_loss(R, Q, update_model=(i % grad_accum == grad_accum - 1))
             del R, Q
             torch.cuda.empty_cache()
