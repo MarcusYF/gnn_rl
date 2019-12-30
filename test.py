@@ -255,6 +255,33 @@ class MultiHeadedAttention(nn.Module):
             return x
 
 
+class PositionalEncoding(nn.Module):
+    "Implement the PE function."
+
+    def __init__(self, d_model, dropout, max_len=50):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        # Compute the positional encodings once in log space.
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) *
+                             -(math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+
+        self.pe = pe.cuda()
+        # self.register_buffer('pe', pe)
+
+    def forward(self, x, position):
+        x = x + self.pe[position]
+        return self.dropout(x)
+
+# pe = PositionalEncoding(10, 0, 50)
+# x = torch.tensor([[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0]])
+# x = pe(x, 1)
+
+
 class DQNet(nn.Module):
     # TODO k, m, ajr should be excluded::no generalization
     def __init__(self, k, m, ajr, num_head, hidden_dim):
@@ -263,18 +290,18 @@ class DQNet(nn.Module):
         self.m = m
         self.n = k * m
         self.num_head = num_head
-        self.hidden_dim = hidden_dim
-        self.value1 = nn.Linear(num_head*hidden_dim, hidden_dim//2)
+        self.hidden_dim = hidden_dim + 2 + k
+        self.value1 = nn.Linear(num_head*self.hidden_dim, hidden_dim//2)
         self.value2 = nn.Linear(hidden_dim//2, 1)
         self.layers = nn.ModuleList([GCN(k, m, ajr, hidden_dim, F.relu)])
         self.MHA = MultiHeadedAttention(h=num_head \
-                           , d_model=num_head*hidden_dim \
+                           , d_model=num_head*self.hidden_dim \
                            , dropout=0.1 \
                            , activate_linear=True)
 
         self.h_residual = []
 
-    def forward(self, g, step):
+    def forward(self, g, gnn_step, max_step, remain_step):
         n = self.n
         k = self.k
         m = self.m
@@ -283,12 +310,15 @@ class DQNet(nn.Module):
 
         h = g.ndata['h']
         self.h_residual = []
-        for i in range(step):
+        for i in range(gnn_step):
             for conv in self.layers:
                 h_new = conv(g, h)
                 self.h_residual.append(torch.norm(h_new-h).detach())
                 h = h_new
-        g.ndata['h'] = h
+
+        pe = PositionalEncoding(h.shape[1], dropout=0, max_len=max_step)
+        h = pe(h, remain_step)
+        g.ndata['h'] = torch.cat([h, g.ndata['x'], g.ndata['label']], dim=1)
 
         # compute centroid embedding c_i
         # gc_x = torch.mm(g.ndata['x'].t(), g.ndata['label']) / m
@@ -327,20 +357,20 @@ class DQNet(nn.Module):
         return S_a_encoding, h, Q_sa.squeeze()
 
 
-g = generate_G(k=3, m=5, adjacent_reserve=7, hidden_dim=6, a=1, sample=False)
-dqn = DQNet(k=3, m=5, ajr=7, num_head=4, hidden_dim=6)
-# iter GCN for fixed steps and forward dqn
-S_a_encoding, h, Q_sa = dqn(g['g'], step=10)
-
-kcut_graph = KCut_DGL(3, 5, 7, 6, 1)
-
-
-kcut_graph.S
-kcut_graph.step((0, 6))
-kcut_graph.S
-kcut_graph.step((6, 0))
-kcut_graph.S
-kcut_graph.calc_S()
+# g = generate_G(k=3, m=5, adjacent_reserve=7, hidden_dim=6, a=1, sample=False)
+# dqn = DQNet(k=3, m=5, ajr=7, num_head=4, hidden_dim=6)
+# # iter GCN for fixed steps and forward dqn
+# S_a_encoding, h, Q_sa = dqn(g['g'], gnn_step=10, max_step=50, remain_step=0)
+#
+# kcut_graph = KCut_DGL(3, 5, 7, 6, 1)
+#
+#
+# kcut_graph.S
+# kcut_graph.step((0, 6))
+# kcut_graph.S
+# kcut_graph.step((6, 0))
+# kcut_graph.S
+# kcut_graph.calc_S()
 
 
 

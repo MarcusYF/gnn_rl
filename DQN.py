@@ -97,7 +97,7 @@ class DQN:
             else:
                 G = dc(state)
 
-            S_a_encoding, h, Q_sa = self.model(G, step=gcn_step)
+            S_a_encoding, h, Q_sa = self.model(G, gnn_step=gcn_step, max_step=episode_len, remain_step=episode_len-1-t)
 
             # record
             h_support = h.nonzero().shape[0]
@@ -167,8 +167,8 @@ class DQN:
             G_end.ndata['label'] = G_end.ndata['label'][self.experience_replay_buffer[episode_i].label_perm[step_j+q_step], :]
 
             # estimate Q-values
-            _, _, Q_s1a = self.model(G_start, step=gcn_step)
-            _, _, Q_s2a = self.model_target(G_end, step=gcn_step)
+            _, _, Q_s1a = self.model(G_start, gnn_step=gcn_step, max_step=episode_len, remain_step=episode_len-1-step_j)
+            _, _, Q_s2a = self.model_target(G_end, gnn_step=gcn_step, max_step=episode_len, remain_step=episode_len-1-step_j)
 
             # calculate accumulated reword
             swap_i, swap_j = self.experience_replay_buffer[episode_i].action_seq[step_j]
@@ -177,10 +177,13 @@ class DQN:
             r = torch.sum(r * torch.tensor([self.gamma ** i for i in range(q_step)]))
 
             # calculate diff between Q-values at start/end
-            if not ddqn:
-                q = self.gamma ** q_step * Q_s2a.max()
+            if step_j == episode_len - 1:
+                q = 0
             else:
-                q = self.gamma ** q_step * Q_s2a[Q_s1a.argmax()]
+                if not ddqn:
+                    q = self.gamma ** q_step * Q_s2a.max()
+                else:
+                    q = self.gamma ** q_step * Q_s2a[Q_s1a.argmax()]
             q -= Q_s1a[swap_i * G_start.number_of_nodes() + swap_j]
 
             R.append(r.unsqueeze(0))
@@ -235,4 +238,5 @@ class DQN:
 
     def update_target_net(self):
         self.model_target = pickle.loads(pickle.dumps(self.model))
+
 
