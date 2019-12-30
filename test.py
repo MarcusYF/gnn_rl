@@ -317,8 +317,7 @@ class DQNet(nn.Module):
                 h = h_new
 
         pe = PositionalEncoding(h.shape[1], dropout=0, max_len=max_step)
-        h = pe(h, remain_step)
-        g.ndata['h'] = torch.cat([h, g.ndata['x'], g.ndata['label']], dim=1)
+        g.ndata['h'] = torch.cat([pe(h, remain_step), g.ndata['x'], g.ndata['label']], dim=1)
 
         # compute centroid embedding c_i
         # gc_x = torch.mm(g.ndata['x'].t(), g.ndata['label']) / m
