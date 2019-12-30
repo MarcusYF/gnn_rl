@@ -168,7 +168,7 @@ class DQN:
 
             # estimate Q-values
             _, _, Q_s1a = self.model(G_start, gnn_step=gcn_step, max_step=episode_len, remain_step=episode_len-1-step_j)
-            _, _, Q_s2a = self.model_target(G_end, gnn_step=gcn_step, max_step=episode_len, remain_step=episode_len-1-step_j)
+            _, _, Q_s2a = self.model_target(G_end, gnn_step=gcn_step, max_step=episode_len, remain_step=episode_len-1-step_j-q_step)
 
             # calculate accumulated reword
             swap_i, swap_j = self.experience_replay_buffer[episode_i].action_seq[step_j]
