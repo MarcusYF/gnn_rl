@@ -6,7 +6,7 @@ Created on Sat Mar  2 16:30:53 2019
 """
 
 from DQN import DQN
-from test import *
+from k_cut import *
 import matplotlib.pyplot as plt
 from smooth_signal import smooth
 import numpy as np
@@ -15,6 +15,7 @@ import torch
 import os
 import gc
 import memory_profiler
+import matplotlib.pyplot as plt
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 # n = 30  # number of nodes
@@ -107,3 +108,90 @@ plt.ylabel('mean entropy')
 PATH = 'mvc_net.pt'
 torch.save(alg.model.state_dict(), PATH)
 
+def vis_g(problem, name='test', topo='knn'):
+    k = problem.k
+    g = problem.g
+    X = g.ndata['x']
+    n = X.shape[0]
+    label = g.ndata['label']
+    link = dc(g.edata['e_type'].view(n, n - 1, 2))
+    c = ['r', 'b', 'y']
+    plt.cla()
+
+    for i in range(k):
+        a = X[(label[:, i] > 0).nonzero().squeeze()]
+        plt.scatter(a[:, 0], a[:, 1], s=60, c=c[i])
+
+    for i in range(n):
+        plt.annotate(str(i), xy=(X[i, 0], X[i, 1]))
+        for j in range(n - 1):
+            if topo=='knn':
+                topo = 0
+            else:
+                topo = 1
+            if link[i, j][topo].item() == 1:
+                j_ = j
+                if j >= i:
+                    j_ = j + 1
+                plt.plot([X[i, 0], X[j_, 0]], [X[i, 1], X[j_, 1]], '-', color='k')
+
+    plt.savefig('./' + name + '.png')
+    plt.close()
+
+
+from k_cut import KCut_DGL
+k=3
+problem = KCut_DGL(k=k, m=3, adjacent_reserve=3, hidden_dim=8, random_init_label=True, a=1, label=[0,0,0,1,1,1,2,2,2])
+problem.reset()
+problem.calc_S()
+problem.g.ndata['label']
+problem.reset_label([0,1,1,0,1,2,2,0,2])
+problem.calc_S()
+problem.step((0,1))
+# g = generate_G(k=k, m=4, adjacent_reserve=1, hidden_dim=8, random_init_label=True, a=1, sample=False)['g']
+
+import itertools
+import tqdm
+all_state = set([','.join([str(i) for i in x]) for x in list(itertools.permutations([0,0,0,1,1,1,2,2,2], 9))])
+
+Q_table = {}
+c = 0
+for state in all_state:
+    c += 1
+    print(c)
+    l = [int(x) for x in state.split(',')]
+    R = []
+    for i in range(9):
+        for j in range(9):
+            problem.reset_label(l)
+            _, r = problem.step((i, j))
+            R.append(r.item())
+    Q_table[state] = R
+
+# Q-value iter
+
+
+
+
+
+
+
+
+g = problem.g
+vis_g(problem, name='test', topo='cluster')
+problem.step((4,8))
+vis_g(problem, name='test_1', topo='cluster')
+problem.step((7,11))
+vis_g(problem, name='test_2', topo='cluster')
+problem.step((5,6))
+vis_g(problem, name='test_3', topo='cluster')
+problem.step((2,10))
+vis_g(problem, name='test_4', topo='cluster')
+
+# Q-value iteration
+
+
+g = dc(problem.g)
+problem.step((4,10), g)
+g = dc(problem.g)
+problem.step((4,10), g)

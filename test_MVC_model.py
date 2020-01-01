@@ -85,3 +85,5 @@ nx.draw(state.g.to_networkx(), pos, node_color=node_tag, with_labels=True)
 plt.show()
 
 print('Ratio: {}'.format((sum_r/sum_r2).item()))
+
+

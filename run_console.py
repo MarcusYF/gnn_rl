@@ -1,5 +1,5 @@
 from DQN import DQN, to_cuda, EpisodeHistory
-from test import *
+from k_cut import *
 import matplotlib.pyplot as plt
 from smooth_signal import smooth
 import numpy as np
@@ -45,14 +45,14 @@ def run_dqn():
 
 run_dqn()
 
-def test_model(step=50):
+def test_model(episode_len=50):
     test_problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=hidden_dim, random_init_label=True, a=a)
     n = test_problem.k * test_problem.m
     g = to_cuda(test_problem.g)
-    ep = EpisodeHistory(g, max_episode_len=step)
+    ep = EpisodeHistory(g, max_episode_len=episode_len)
 
-    for i in range(step):
-        S_a_encoding, h, Q_sa = alg.model(g, gnn_step=gnn_step, max_step=episode_len, remain_step=episode_len-1-step)
+    for i in range(episode_len):
+        S_a_encoding, h1, h2, Q_sa = alg.model(g, gnn_step=gnn_step, max_step=episode_len, remain_step=episode_len-1-i)
         best_action = Q_sa.argmax()
         swap_i, swap_j = best_action / n, best_action - best_action / n * n
         state, reward = test_problem.step((swap_i, swap_j))
@@ -65,3 +65,15 @@ ep = test_model(episode_len)
 
 sum(ep.reward_seq)
 
+
+g1 = to_cuda(g)
+g2 = to_cuda(g)
+i=49
+S_a_encoding, h1, h2, Q_sa = alg.model(g2, gnn_step=gnn_step, max_step=episode_len, remain_step=episode_len-1-i)
+Q_sa.argmax()
+
+Q_sa
+
+i=0
+S_a_encoding, h1, h2, Q_sa = alg.model(g1, gnn_step=gnn_step, max_step=episode_len, remain_step=episode_len-1-i)
+Q_sa.argmax()

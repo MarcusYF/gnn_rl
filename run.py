@@ -6,7 +6,7 @@ Created on Sat Mar  2 16:30:53 2019
 """
 
 from DQN import DQN
-from test import *
+from k_cut import *
 import argparse
 import numpy as np
 import time

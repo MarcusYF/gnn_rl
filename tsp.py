@@ -7,30 +7,24 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-def generate_G(k, m, adjacent_reserve, hidden_dim, random_init_label=False, a=1, sample=True):
+def generate_G(n, adjacent_reserve, hidden_dim, random_init_label=False, a=1, sample=True):
 
     g = dgl.DGLGraph()
-    g.add_nodes(k*m)
+    g.add_nodes(n)
     # 2-d coordinates 'x'
     if sample:
         g.ndata['x'] = torch.tensor(
             [[0, 0], [0, 1], [1, 0], [1, 1], [0.7, 0.8], [1.5, 1.5], [1.5, 3], [3, 3], [3, 1.5], [1.8, 1.7], [1.8, 0.3],
              [1.8, 0.8], [2.3, 0.8], [2.3, 0.3], [2.1, 0.5]])
     else:
-        g.ndata['x'] = torch.rand((k*m, 2))
+        g.ndata['x'] = torch.rand((n, 2))
 
-    label = torch.tensor(range(k)).unsqueeze(1).expand(k, m).flatten()
-    if random_init_label:
-        label = label[torch.randperm(k * m)]
-    g.ndata['label'] = torch.nn.functional.one_hot(label, k).float()
-    # g.edata['e_type'] = torch.zeros((g.number_of_edges(), 1))
-    # g.edata['d'] = torch.zeros((g.number_of_edges(), 1))
-    # g.edata['w'] = torch.ones((g.number_of_edges(), 1))
+    g.ndata['label'] = torch.zeros(n)
+
     # store the dist-matrix
     for i in range(g.number_of_nodes()):
         v = g.nodes[i]
         v_x = v.data['x']
-        v_label = v.data['label']
 
         # find the top-k nearest neighbors of v
         neighbor_dict = {}
@@ -43,27 +37,24 @@ def generate_G(k, m, adjacent_reserve, hidden_dim, random_init_label=False, a=1,
                 g.add_edges(i, j)
                 g.edges[i, j].data['d'] = d
                 g.edges[i, j].data['w'] = 1 / (1 + torch.exp(a * d))
-                g.edges[i, j].data['e_type'] = torch.zeros((1, 2))
+                g.edges[i, j].data['e_type'] = torch.tensor([[0]])
                 neighbor_dict[j] = d
 
         neighbor_dist = sorted(neighbor_dict.items(), key=lambda x: x[1], reverse=True)
-        nearest_neighbors = [x[0] for x in neighbor_dist[k * m - 1 - adjacent_reserve:]]
+        nearest_neighbors = [x[0] for x in neighbor_dist[n - 1 - adjacent_reserve:]]
 
         # add edges
         for j in range(g.number_of_nodes()):
             if j != i:
-                u_label = g.nodes[j].data['label']
                 if j in nearest_neighbors:
                     # add neighbors
-                    g.edges[i, j].data['e_type'] += torch.tensor([[1, 0]])
-                if torch.max(u_label-v_label).numpy() == 0:
-                    # add group members
-                    g.edges[i, j].data['e_type'] += torch.tensor([[0, 1]])
+                    g.edges[i, j].data['e_type'] += torch.tensor([[1]])
+
 
     # init node embedding h
     g.ndata['h'] = torch.rand((g.number_of_nodes(), hidden_dim))
 
-    G = {'g':g, 'k':k, 'm':m, 'adjacent_reserve':adjacent_reserve, 'hidden_dim':hidden_dim, 'a':a}
+    G = {'g':g, 'n':n, 'adjacent_reserve':adjacent_reserve, 'hidden_dim':hidden_dim, 'a':a}
     return G
 
 
