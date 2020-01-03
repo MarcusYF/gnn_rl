@@ -64,7 +64,7 @@ def generate_G(k, m, adjacent_reserve, hidden_dim, random_init_label=True, a=1, 
                     g.edges[i, j].data['e_type'] += torch.tensor([[0, 1]])
 
     # init node embedding h
-    g.ndata['h'] = torch.rand((g.number_of_nodes(), hidden_dim))
+    g.ndata['h'] = torch.zeros((g.number_of_nodes(), hidden_dim))
 
     G = {'g':g, 'k':k, 'm':m, 'adjacent_reserve':adjacent_reserve, 'hidden_dim':hidden_dim, 'a':a}
     return G
@@ -72,8 +72,8 @@ def generate_G(k, m, adjacent_reserve, hidden_dim, random_init_label=True, a=1, 
 
 class KCut_DGL():
 
-    def __init__(self, k, m, adjacent_reserve, hidden_dim, random_init_label=True, a=1, label=None):
-        self.g = generate_G(k, m, adjacent_reserve, hidden_dim, random_init_label=random_init_label, a=a, sample=False, label=label)['g']
+    def __init__(self, k, m, adjacent_reserve, hidden_dim, random_init_label=True, sample=False, a=1, label=None, x=None):
+        self.g = generate_G(k, m, adjacent_reserve, hidden_dim, random_init_label=random_init_label, a=a, sample=sample, label=label, x=x)['g']
         self.N = k * m
         self.k = k # num of clusters
         self.m = m # num of nodes in cluster
@@ -318,7 +318,7 @@ class DQNet(nn.Module):
         self.m = m
         self.n = k * m
         self.num_head = num_head
-        self.hidden_dim = hidden_dim + 2 + k
+        self.hidden_dim = hidden_dim# + 2 + k
         self.value1 = nn.Linear(num_head*self.hidden_dim, hidden_dim//2)
         self.value2 = nn.Linear(hidden_dim//2, 1)
         self.layers = nn.ModuleList([GCN(k, m, ajr, hidden_dim, F.relu)])
@@ -344,8 +344,10 @@ class DQNet(nn.Module):
                 self.h_residual.append(torch.norm(h_new-h).detach())
                 h = h_new
 
-        pe = PositionalEncoding(h.shape[1], dropout=0, max_len=max_step)
-        g.ndata['h'] = torch.cat([pe(h, remain_step), g.ndata['x'], g.ndata['label']], dim=1)
+        # pe = PositionalEncoding(h.shape[1], dropout=0, max_len=max_step)
+        # g.ndata['h'] = torch.cat([pe(h, remain_step), g.ndata['x'], g.ndata['label']], dim=1)
+        # g.ndata['h'] = torch.cat([h, g.ndata['x'], g.ndata['label']], dim=1)
+        g.ndata['h'] = h
 
         # compute centroid embedding c_i
         # gc_x = torch.mm(g.ndata['x'].t(), g.ndata['label']) / m

@@ -11,21 +11,21 @@ from tqdm import tqdm
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 k = 3
-m = 4
-ajr = 7
+m = 3
+ajr = 5
 hidden_dim = 8
 a = 1
-gamma = 1.0
+gamma = 0.95
 eps = 0.1
-lr = 0.02
+lr = 0.0001
 replay_buffer_max_size = 10
-n_epoch = 100
+n_epoch = 50
 target_update_step = 5
 batch_size = 100
 grad_accum = 10
 num_episodes = 1
 episode_len = 50
-gnn_step = 20
+gnn_step = 4
 q_step = 1
 ddqn = False
 
@@ -66,14 +66,14 @@ ep = test_model(episode_len)
 sum(ep.reward_seq)
 
 
-g1 = to_cuda(g)
-g2 = to_cuda(g)
+g1 = to_cuda(problem.g)
+g2 = to_cuda(problem.g)
 i=49
-S_a_encoding, h1, h2, Q_sa = alg.model(g2, gnn_step=gnn_step, max_step=episode_len, remain_step=episode_len-1-i)
+S_a_encoding, h1, h2, Q_sa = alg.model(g2, gnn_step=gnn_step, max_step=episode_len, remain_step=1)
 Q_sa.argmax()
 
 Q_sa
 
 i=0
-S_a_encoding, h1, h2, Q_sa = alg.model(g1, gnn_step=gnn_step, max_step=episode_len, remain_step=episode_len-1-i)
+S_a_encoding, h1, h2, Q_sa = alg.model(g1, gnn_step=gnn_step, max_step=episode_len)
 Q_sa.argmax()

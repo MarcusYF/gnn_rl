@@ -139,8 +139,11 @@ class DQN:
 
             if t % episode_len in (0, episode_len//2, episode_len-1):
                 print('\nh-nonzero entry: %.0f, %.0f'%(h_support1, h_support2))
+                print('--------------------------------------\n')
+                print(h2)
+                print('--------------------------------------\n')
                 print('h-mean: %.5f'%h_mean.item())
-                print('h-std: ', ['%.2f'%x.item() for x in h_residual])
+                print('h-residual: ', ['%.2f'%x.item() for x in h_residual])
                 print('q value-mean: %.5f'%q_mean.item())
                 print('q value-std: %.5f'%q_var.item())
                 print(weight_monitor(self.model, self.model_target))
@@ -203,21 +206,34 @@ class DQN:
             _, _, _, Q_s1a = self.model(G_start, gnn_step=gnn_step, max_step=episode_len, remain_step=episode_len-1-step_j)
             _, _, _, Q_s2a = self.model_target(G_end, gnn_step=gnn_step, max_step=episode_len, remain_step=episode_len-1-step_j-q_step)
 
-            # calculate accumulated reword
+            # calculate accumulated reward
             swap_i, swap_j = self.experience_replay_buffer[episode_i].action_seq[step_j]
 
             r = self.experience_replay_buffer[episode_i].reward_seq[step_j: step_j + q_step]
             r = torch.sum(r * torch.tensor([self.gamma ** i for i in range(q_step)]))
-
+            r *= 10
             # calculate diff between Q-values at start/end
-            if step_j == episode_len - 1:
-                q = 0
+            # if step_j == episode_len - 1:
+            #     q = 0
+            # else:
+            if not ddqn:
+                argmax2 = Q_s2a.argmax().item()
+                q2 = Q_s2a[argmax2]
+                q2 = q2.clone()#.requires_grad_(True)
+                del Q_s2a
+                torch.cuda.empty_cache()
+                # q2 = Q_s2a.max()
+                q = self.gamma ** q_step * q2
             else:
-                if not ddqn:
-                    q = self.gamma ** q_step * Q_s2a.max()
-                else:
-                    q = self.gamma ** q_step * Q_s2a[Q_s1a.argmax()]
-            q -= Q_s1a[swap_i * G_start.number_of_nodes() + swap_j]
+                argmax1 = Q_s1a.argmax().item()
+                q2 = Q_s2a[argmax1].clone()#.requires_grad_(True)
+                # q2 = Q_s2a[Q_s1a.argmax()]
+                q = self.gamma ** q_step * q2
+            q1 = Q_s1a[swap_i * G_start.number_of_nodes() + swap_j].clone()#.requires_grad_(True)
+            # q1 = Q_s1a[swap_i * G_start.number_of_nodes() + swap_j]
+            q -= q1
+            del Q_s1a
+            torch.cuda.empty_cache()
 
             R.append(r.unsqueeze(0))
             Q.append(q.unsqueeze(0))

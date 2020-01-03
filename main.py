@@ -141,17 +141,21 @@ def vis_g(problem, name='test', topo='knn'):
 
 from k_cut import KCut_DGL
 k=3
-problem = KCut_DGL(k=k, m=3, adjacent_reserve=3, hidden_dim=8, random_init_label=True, a=1, label=[0,0,0,1,1,1,2,2,2])
-problem.reset()
+problem = KCut_DGL(k=k, m=3, adjacent_reserve=5, hidden_dim=8, random_init_label=True, a=1, sample=False)
+problem = KCut_DGL(k=k, m=3, adjacent_reserve=5, hidden_dim=8, random_init_label=False, a=1, sample=True
+                   , label=[0,0,0,0,0,1,1,1,1,1,2,2,2,2,2]
+                   , x=torch.tensor([[0, 0], [0, 1], [1, 0], [1, 1], [0.7, 0.8], [1.5, 1.5], [1.5, 3], [3, 3], [3, 1.5], [1.8, 1.7], [1.8, 0.3], [1.8, 0.8], [2.3, 0.8], [2.3, 0.3], [2.1, 0.5]]))
 problem.calc_S()
 problem.g.ndata['label']
+vis_g(problem, name='toy9', topo='cluster')
 problem.reset_label([0,1,1,0,1,2,2,0,2])
 problem.calc_S()
 problem.step((0,1))
 # g = generate_G(k=k, m=4, adjacent_reserve=1, hidden_dim=8, random_init_label=True, a=1, sample=False)['g']
 
 import itertools
-import tqdm
+from tqdm import tqdm
+import numpy as np
 all_state = set([','.join([str(i) for i in x]) for x in list(itertools.permutations([0,0,0,1,1,1,2,2,2], 9))])
 
 Q_table = {}
@@ -166,16 +170,73 @@ for state in all_state:
             problem.reset_label(l)
             _, r = problem.step((i, j))
             R.append(r.item())
-    Q_table[state] = R
+    Q_table[state] = np.array(R)
+
 
 # Q-value iter
+# problem_bak = dc(problem) # detached backup for problem instance
+# Q_table_bak = dc(Q_table) # detached backup for Q-table
+
+
+Q_table_ = dc(Q_table_bak) # target Q-table
+Q_table = dc(Q_table_bak) # Q-table
+State_Action_Reward = dc(Q_table_bak)
+gamma = 1.0
+
+
+Err = []
+for ite in tqdm(range(10)):
+    for state in Q_table.keys():
+        for i in range(9):
+            for j in range(9):
+                action = 9*i+j
+                s = state.split(',')
+                swap_i = s[i]
+                swap_j = s[j]
+                s[i] = swap_j
+                s[j] = swap_i
+                new_state = ','.join(s)
+                Q_table[state][action] = State_Action_Reward[state][action] + gamma * max(Q_table_[new_state])
+
+    # update target Q-table
+    err = 0
+    for state in Q_table.keys():
+        diff = Q_table[state] - Q_table_[state]
+        err += np.sqrt(np.mean(diff ** 2))
+    Err.append(err)
+    print(err)
+    Q_table_ = dc(Q_table)
 
 
 
+problem.reset_label([2,1,1,2,0,1,0,0,2])
+problem.calc_S()
+vis_g(problem, name='test9', topo='cluster') 
+
+action = np.argmax(Q_table['0,1,1,2,0,2,0,1,2'])
+action = (action // 9, action % 9)
+_, reward1 = problem.step(action)
+vis_g(problem, name='test9_1', topo='cluster')
+
+action = np.argmax(Q_table['0,2,1,2,0,1,0,1,2'])
+action = (action // 9, action % 9)
+_, reward2 = problem.step(action)
+vis_g(problem, name='test9_2', topo='cluster')
+
+action = np.argmax(Q_table['0,0,1,2,0,1,2,1,2'])
+action = (action // 9, action % 9)
+_, reward3 = problem.step(action)
+vis_g(problem, name='test9_3', topo='cluster')
+
+action = np.argmax(Q_table['0,0,1,2,1,1,2,0,2'])
+action = (action // 9, action % 9)
+_, reward3 = problem.step(action)
+vis_g(problem, name='test9_3', topo='cluster')
 
 
-
-
+for state in Q_table.keys():
+    if max(Q_table[state]) <= 0.02:
+        print(state)
 
 g = problem.g
 vis_g(problem, name='test', topo='cluster')
