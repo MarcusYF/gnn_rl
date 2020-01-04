@@ -154,7 +154,7 @@ for ite in tqdm(range(10)):
 episode_name = 'toy_models/test1_flip_'
 Obj = []
 Reward = []
-init_solution = np.random.permutation([1,1,1,2,2,2,3,3,3])
+init_solution = np.random.permutation([1,1,1,2,2,2,0,0,0])
 problem.reset_label(init_solution)
 vis_g(problem, name=episode_name+'0', topo='cluster')
 Obj.append(problem.calc_S())
