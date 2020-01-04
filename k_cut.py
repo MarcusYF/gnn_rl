@@ -7,28 +7,29 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-def generate_G(k, m, adjacent_reserve, hidden_dim, random_init_label=True, a=1, sample=True, label=None, x=None):
+def generate_G(k, m, adjacent_reserve, hidden_dim, random_sample_node=True, x=None, random_init_label=True, label=None, a=1):
 
+    # init graph
     g = dgl.DGLGraph()
     g.add_nodes(k*m)
+
     # 2-d coordinates 'x'
-    if sample:
+    if random_sample_node:
+        g.ndata['x'] = torch.rand((k * m, 2))
+    else:
+        g.ndata['x'] = x
         # g.ndata['x'] = torch.tensor(
         #     [[0, 0], [0, 1], [1, 0], [1, 1], [0.7, 0.8], [1.5, 1.5], [1.5, 3], [3, 3], [3, 1.5], [1.8, 1.7], [1.8, 0.3],
         #      [1.8, 0.8], [2.3, 0.8], [2.3, 0.3], [2.1, 0.5]])
-        g.ndata['x'] = x
-    else:
-        g.ndata['x'] = torch.rand((k*m, 2))
 
     if random_init_label:
         label = torch.tensor(range(k)).unsqueeze(1).expand(k, m).flatten()
         label = label[torch.randperm(k * m)]
     else:
         label = torch.tensor(label)
+
     g.ndata['label'] = torch.nn.functional.one_hot(label, k).float()
-    # g.edata['e_type'] = torch.zeros((g.number_of_edges(), 1))
-    # g.edata['d'] = torch.zeros((g.number_of_edges(), 1))
-    # g.edata['w'] = torch.ones((g.number_of_edges(), 1))
+
     # store the dist-matrix
     for i in range(g.number_of_nodes()):
         v = g.nodes[i]
@@ -66,20 +67,26 @@ def generate_G(k, m, adjacent_reserve, hidden_dim, random_init_label=True, a=1, 
     # init node embedding h
     g.ndata['h'] = torch.zeros((g.number_of_nodes(), hidden_dim))
 
-    G = {'g':g, 'k':k, 'm':m, 'adjacent_reserve':adjacent_reserve, 'hidden_dim':hidden_dim, 'a':a}
+    G = {'g': g, 'k': k, 'm': m, 'adjacent_reserve': adjacent_reserve, 'hidden_dim': hidden_dim, 'a': a}
     return G
 
 
 class KCut_DGL():
 
-    def __init__(self, k, m, adjacent_reserve, hidden_dim, random_init_label=True, sample=False, a=1, label=None, x=None):
-        self.g = generate_G(k, m, adjacent_reserve, hidden_dim, random_init_label=random_init_label, a=a, sample=sample, label=label, x=x)['g']
+    def __init__(self, k, m, adjacent_reserve, hidden_dim, random_sample_node=True, x=None, random_init_label=True, label=None, a=1):
+        self.g = generate_G(k, m, adjacent_reserve, hidden_dim
+                            , random_sample_node=random_sample_node, x=x
+                            , random_init_label=random_init_label, label=label
+                            , a=a)['g']
         self.N = k * m
         self.k = k # num of clusters
         self.m = m # num of nodes in cluster
         self.adjacent_reserve = adjacent_reserve
         self.hidden_dim = hidden_dim
+        self.random_sample_node = random_sample_node
+        self.x = x
         self.random_init_label = random_init_label
+        self.label = label
         self.a = a
         self.S = self.calc_S()
 
@@ -91,21 +98,43 @@ class KCut_DGL():
             g = self.g
         S = 0
         for i in range(self.k):
-            block_i = g.ndata['x'][(g.ndata['label'][:, i] > 0).nonzero().squeeze()]
-            for j in range(self.m):
+            block_i = g.ndata['x'][(g.ndata['label'][:, i] > .5).nonzero().squeeze()]
+            block_size = block_i.view(-1, 2).shape[0]
+            if block_size < 2:
+                continue
+            for j in range(block_size):
                 block_ij = block_i - block_i[j]
                 S += torch.sum(torch.sqrt(torch.diag(torch.mm(block_ij, block_ij.t()))))
         return S/2
 
     def reset(self):
-        self.g = generate_G(self.k, self.m, self.adjacent_reserve, self.hidden_dim, random_init_label=self.random_init_label, a=self.a, sample=False)['g']
+        self.g = generate_G(self.k, self.m, self.adjacent_reserve, self.hidden_dim, random_sample_node=self.random_sample_node, x=self.x, random_init_label=self.random_init_label, label=self.label, a=self.a)['g']
         self.S = self.calc_S()
         return self.g
 
-    def reset_label(self, label):
-        self.g = generate_G(self.k, self.m, self.adjacent_reserve, self.hidden_dim, random_init_label=False, a=self.a, sample=True, label=label, x=self.g.ndata['x'])['g']
-        self.S = self.calc_S()
-        return self.g
+    def reset_label(self, label, g=None, calc_S=True, rewire_edges=True):
+        if g is None:
+            g = self.g
+        label = torch.tensor(label)
+        g.ndata['label'] = torch.nn.functional.one_hot(label, self.k).float()
+
+        # rewire edges
+        if rewire_edges:
+            for i, j in itertools.product(range(self.N), range(self.N)):
+                if j != i:
+                    u_label = g.nodes[j].data['label']
+                    v_label = g.nodes[i].data['label']
+                    if torch.max(u_label-v_label).numpy() < .5:
+                        cluster_label = torch.tensor([[1.]])
+                    else:
+                        cluster_label = torch.tensor([[0.]])
+                    # add group members
+                    g.edges[i, j].data['e_type'] \
+                        = torch.cat([g.edges[i, j].data['e_type'][:, 0].unsqueeze(0), cluster_label], dim=1)
+
+        if g is None and calc_S:
+            self.S = self.calc_S()
+        return g
 
     def get_legal_actions(self):
         return list(itertools.product(range(self.N), range(self.N)))
@@ -118,50 +147,92 @@ class KCut_DGL():
         return state.ndata['x'][i] - state.ndata['x'][(state.ndata['label'][:, i_label] > 0).nonzero().squeeze()], \
                 state.ndata['x'][j] - state.ndata['x'][(state.ndata['label'][:, j_label] > 0).nonzero().squeeze()]
 
-    def step(self, action, state=None):
+    def calc_flip_delta(self, i, i_label, target_label, state=None):
 
-        mode = 'outer'
         if state is None:
-            mode = 'self'
             state = self.g
 
-        i, j = action
-        i_label, j_label = [(state.ndata['label'][c] > 0).nonzero().item() for c in action]
+        return state.ndata['x'][i:i+1] - state.ndata['x'][(state.ndata['label'][:, i_label] > 0).nonzero().squeeze()], \
+               state.ndata['x'][i:i+1] - state.ndata['x'][(state.ndata['label'][:, target_label] > 0).nonzero().squeeze()]
 
-        if i == j or i_label == j_label:
-            return state, torch.tensor(0.0)
+    def step(self, action, action_type='swap', state=None, rewire_edges=True):
 
-        # rewire edges
-        group_i = (state.ndata['label'][:, i_label] > 0).nonzero().squeeze()
-        group_j = (state.ndata['label'][:, j_label] > 0).nonzero().squeeze()
-        state.edges[i, group_i].data['e_type'] -= torch.tensor([[0, 1]]).repeat(self.m - 1, 1)
-        state.edges[group_i, i].data['e_type'] -= torch.tensor([[0, 1]]).repeat(self.m - 1, 1)
-        state.edges[i, group_j].data['e_type'] += torch.tensor([[0, 1]]).repeat(self.m, 1)
-        state.edges[group_j, i].data['e_type'] += torch.tensor([[0, 1]]).repeat(self.m, 1)
-        state.edges[j, group_j].data['e_type'] -= torch.tensor([[0, 1]]).repeat(self.m - 1, 1)
-        state.edges[group_j, j].data['e_type'] -= torch.tensor([[0, 1]]).repeat(self.m - 1, 1)
-        state.edges[j, group_i].data['e_type'] += torch.tensor([[0, 1]]).repeat(self.m, 1)
-        state.edges[group_i, j].data['e_type'] += torch.tensor([[0, 1]]).repeat(self.m, 1)
-        state.edges[j, i].data['e_type'] -= torch.tensor([[0, 2]])
-        state.edges[i, j].data['e_type'] -= torch.tensor([[0, 2]])
+        if state is None:
+            state = self.g
 
-        # compute reward
-        old_0, old_1 = self.calc_swap_delta(i, j, i_label, j_label, state)
+        if action_type=='swap':
+            i, j = action
+            i_label, j_label = [(state.ndata['label'][c] > 0).nonzero().item() for c in action]
 
-        # swap two nodes
-        tmp = dc(state.nodes[i].data['label'])
-        state.nodes[i].data['label'] = state.nodes[j].data['label']
-        state.nodes[j].data['label'] = tmp
+            if i == j or i_label == j_label:
+                return state, torch.tensor(.0)
 
-        new_0, new_1 = self.calc_swap_delta(i, j, j_label, i_label, state)
-        reward = torch.sqrt(torch.sum(torch.pow(torch.cat([old_0, old_1]), 2), axis=1)).sum() - torch.sqrt(torch.sum(torch.pow(torch.cat([new_0, new_1]), 2), axis=1)).sum()
+            # rewire edges
+            if rewire_edges:
+                group_i = (state.ndata['label'][:, i_label] > .5).nonzero().squeeze()
+                group_j = (state.ndata['label'][:, j_label] > .5).nonzero().squeeze()
+                state.edges[i, group_i].data['e_type'] -= torch.tensor([[0, 1]]).repeat(self.m - 1, 1)
+                state.edges[group_i, i].data['e_type'] -= torch.tensor([[0, 1]]).repeat(self.m - 1, 1)
+                state.edges[i, group_j].data['e_type'] += torch.tensor([[0, 1]]).repeat(self.m, 1)
+                state.edges[group_j, i].data['e_type'] += torch.tensor([[0, 1]]).repeat(self.m, 1)
+                state.edges[j, group_j].data['e_type'] -= torch.tensor([[0, 1]]).repeat(self.m - 1, 1)
+                state.edges[group_j, j].data['e_type'] -= torch.tensor([[0, 1]]).repeat(self.m - 1, 1)
+                state.edges[j, group_i].data['e_type'] += torch.tensor([[0, 1]]).repeat(self.m, 1)
+                state.edges[group_i, j].data['e_type'] += torch.tensor([[0, 1]]).repeat(self.m, 1)
+                state.edges[j, i].data['e_type'] -= torch.tensor([[0, 2]])
+                state.edges[i, j].data['e_type'] -= torch.tensor([[0, 2]])
 
+            # compute reward
+            old_0, old_1 = self.calc_swap_delta(i, j, i_label, j_label, state)
 
-        if mode == 'self':
+            # swap two nodes
+            tmp = dc(state.nodes[i].data['label'])
+            state.nodes[i].data['label'] = state.nodes[j].data['label']
+            state.nodes[j].data['label'] = tmp
+
+            new_0, new_1 = self.calc_swap_delta(i, j, j_label, i_label, state)
+            reward = torch.sqrt(torch.sum(torch.pow(torch.cat([old_0, old_1]), 2), axis=1)).sum()\
+                     - torch.sqrt(torch.sum(torch.pow(torch.cat([new_0, new_1]), 2), axis=1)).sum()
+
+        elif action_type == 'flip':
+            i = action[0]
+            target_label = action[1]
+            i_label = state.nodes[i].data['label'].argmax().item()
+
+            if i_label == target_label:
+                return state, torch.tensor(0.0)
+
+            # rewire edges
+            if rewire_edges:
+                group_i = (state.ndata['label'][:, i_label] > .5).nonzero().squeeze()
+                group_j = (state.ndata['label'][:, target_label] > .5).nonzero().squeeze()
+                n1 = state.edges[i, group_i].data['e_type'].shape[0]
+                n2 = state.edges[i, group_j].data['e_type'].shape[0]
+                state.edges[i, group_i].data['e_type'] -= torch.tensor([[0, 1]]).repeat(n1, 1)
+                state.edges[group_i, i].data['e_type'] -= torch.tensor([[0, 1]]).repeat(n1, 1)
+                state.edges[i, group_j].data['e_type'] += torch.tensor([[0, 1]]).repeat(n2, 1)
+                state.edges[group_j, i].data['e_type'] += torch.tensor([[0, 1]]).repeat(n2, 1)
+
+            # compute reward
+            old, new = self.calc_flip_delta(i, i_label, target_label, state)
+
+            if old.shape[0] + new.shape[0] < .5:
+                reward = torch.tensor(0)
+            elif new.shape[0] < .5:
+                reward = torch.sqrt(torch.sum(torch.pow(old, 2), axis=1)).sum()
+            elif old.shape[0] < .5:
+                reward = - torch.sqrt(torch.sum(torch.pow(new, 2), axis=1)).sum()
+            else:
+                reward = torch.sqrt(torch.sum(torch.pow(old, 2), axis=1)).sum() \
+                        - torch.sqrt(torch.sum(torch.pow(new, 2), axis=1)).sum()
+
+            # flip node
+            state.nodes[i].data['label'] = torch.nn.functional.one_hot(torch.tensor([target_label]), self.k).float()
+
+        if state is None:
             self.S -= reward
-            return self.g, reward
-        else:
-            return state, reward
+
+        return state, reward
 
 
 def udf_u_mul_e(edges):

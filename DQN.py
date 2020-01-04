@@ -288,7 +288,7 @@ class DQN:
     def update_target_net(self):
         self.model_target = pickle.loads(pickle.dumps(self.model))
 
-g = generate_G(k=3, m=5, adjacent_reserve=7, hidden_dim=6, a=1, sample=False)
+g = generate_G(k=3, m=5, adjacent_reserve=7, hidden_dim=6)
 dqn = DQNet(k=3, m=5, ajr=7, num_head=4, hidden_dim=6).cuda()
 # iter GCN for fixed steps and forward dqn
 S_a_encoding, h1, h2, Q_sa = dqn(to_cuda(g['g']), gnn_step=10, max_step=50, remain_step=0)
