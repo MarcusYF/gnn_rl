@@ -238,7 +238,9 @@ class KCut_DGL():
 def udf_u_mul_e(edges):
     # a= edges.data['d'] * edges.data['e_type'][:, 0].unsqueeze(1)
     # print(a.view(15,14,1))
-    return {'m_n1_v': edges.src['h'] * edges.data['w'] * edges.data['e_type'][:, 0].unsqueeze(1)
+    return {
+        'm_n1_h': edges.src['h'] * edges.data['e_type'][:, 0].unsqueeze(1)
+        , 'm_n1_v': edges.src['h'] * edges.data['w'] * edges.data['e_type'][:, 0].unsqueeze(1)
         , 'm_n1_w': edges.data['w'] * edges.data['e_type'][:, 0].unsqueeze(1)
         , 'm_n1_d': edges.data['d'] * edges.data['e_type'][:, 0].unsqueeze(1)
         , 'm_n2_v': edges.src['h'] * edges.data['w'] * edges.data['e_type'][:, 1].unsqueeze(1)
@@ -252,7 +254,10 @@ def reduce(nodes):
     n2_v = torch.sum(nodes.mailbox['m_n2_v'], 1) / torch.sum(nodes.mailbox['m_n2_w'], 1)
     n1_e = nodes.mailbox['m_n1_d']
     n2_e = nodes.mailbox['m_n2_d']
-    return {'n1_v': n1_v, 'n2_v': n2_v, 'n1_e': n1_e, 'n2_e': n2_e}
+
+    n1_h = torch.sum(nodes.mailbox['m_n1_h'], 1)
+    n1_w = nodes.mailbox['m_n1_w']
+    return {'n1_v': n1_v, 'n2_v': n2_v, 'n1_e': n1_e, 'n2_e': n2_e, 'n1_h': n1_h, 'n1_w': n1_w}
 
 
 class NodeApplyModule(nn.Module):
@@ -266,22 +271,36 @@ class NodeApplyModule(nn.Module):
         self.l3 = nn.Linear(hidden_dim, hidden_dim)
         self.l4 = nn.Linear(ajr, hidden_dim)
         self.l5 = nn.Linear(m-1, hidden_dim)
+
+        self.t3 = nn.Linear(hidden_dim, hidden_dim, bias=False)
+        self.t4 = nn.Linear(1, hidden_dim, bias=False)
+
         self.activation = activation
 
     def forward(self, node):
         x = node.data['x']
         l = node.data['label']
-        n1_v = node.data['n1_v']
-        n2_v = node.data['n2_v']
-        # print(torch.sort(node.data['n2_e'], 1, descending=True)[0][:, 0: self.m-1].squeeze(2))
+        n1_v = node.data['n1_v']  # dist
+        n2_v = node.data['n2_v']  # group
         n1_e = torch.sort(node.data['n1_e'], 1, descending=True)[0][:, 0: self.ajr].squeeze(2)
         n2_e = torch.sort(node.data['n2_e'], 1, descending=True)[0][:, 0: self.m-1].squeeze(2)
+
+        n1_h = node.data['n1_h']
+        n1_w = node.data['n1_w']  # weight
+
         h = self.activation(self.l0(x) + self.l1(l)
-                            + self.l2(n1_v)
-                            + self.l3(n2_v)
-                            + self.l4(n1_e)
-                            + self.l5(n2_e)
+                            + self.l2(n1_h)
+                            # + self.l3(n2_v)
+                            + self.t3(torch.sum(self.activation(self.t4(n1_w)), dim=1))
+                            # + self.l5(n2_e)
                             )
+
+        # h = self.activation(self.l0(x) + self.l1(l)
+        #                     + self.l2(n1_v)
+        #                     # + self.l3(n2_v)
+        #                     + self.l4(n1_w)
+        #                     # + self.l5(n2_e)
+        #                     )
         return {'h': h}
 
 
@@ -300,6 +319,12 @@ class GCN(nn.Module):
         g.ndata.pop('n2_e')
         return g.ndata.pop('h')
 
+# gnn = GCN(3, 3, 5, 7, F.relu)
+# problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=7)
+# g = problem.g
+# h = gnn(g, g.ndata['h'])
+# h = gnn(g, h)
+# vis_g(problem, name='toy_models/gnn0', topo='knn')
 
 class MultiHeadedAttention(nn.Module):
 
@@ -393,14 +418,46 @@ class DQNet(nn.Module):
         self.value1 = nn.Linear(num_head*self.hidden_dim, hidden_dim//2)
         self.value2 = nn.Linear(hidden_dim//2, 1)
         self.layers = nn.ModuleList([GCN(k, m, ajr, hidden_dim, F.relu)])
-        self.MHA = MultiHeadedAttention(h=num_head \
-                           , d_model=num_head*self.hidden_dim \
-                           , dropout=0.0 \
+        self.MHA = MultiHeadedAttention(h=num_head
+                           , d_model=num_head*self.hidden_dim
+                           , dropout=0.0
                            , activate_linear=True)
+        # baseline
+        self.t5 = nn.Linear(2*hidden_dim, 1)
+        self.t6 = nn.Linear(hidden_dim, hidden_dim)
+        self.t7 = nn.Linear(2*hidden_dim, hidden_dim)
 
         self.h_residual = []
 
     def forward(self, g, gnn_step, max_step, remain_step):
+        n = self.n
+        k = self.k
+        m = self.m
+        hidden_dim = self.hidden_dim
+        num_head = self.num_head
+
+        h = g.ndata['h']
+        for i in range(gnn_step):
+            for conv in self.layers:
+                h = conv(g, h)
+
+        g.ndata['h'] = h
+
+        h_new = torch.cat([h, g.ndata['x'], g.ndata['label']], dim=1)
+
+        graph_embedding = self.t6(torch.sum(g.ndata['h'], dim=0)).repeat(n**2, 1)
+
+        q = self.t7(torch.cat([g.ndata['h'].repeat(1, n).view(n * n, hidden_dim), h.repeat(n, 1)], axis=1))
+
+        S_a_encoding = torch.cat([graph_embedding, q], axis=1)
+
+        Q_sa = self.t5(F.relu(S_a_encoding)).squeeze()
+
+        Q_sa = (Q_sa.view(n, n) + Q_sa.view(n, n).t()).view(n**2)
+
+        return S_a_encoding, g.ndata['h'], h_new, Q_sa
+
+    def forward_mha(self, g, gnn_step, max_step, remain_step):
         n = self.n
         k = self.k
         m = self.m
