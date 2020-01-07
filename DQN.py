@@ -30,11 +30,12 @@ def to_cuda(G_):
 
 class EpisodeHistory:
     def __init__(self, g, max_episode_len):
-        self.init_state = g
+        self.init_state = dc(g)
         self.n = g.number_of_nodes()
         self.max_episode_len = max_episode_len
         self.episode_len = 0
         self.action_seq = []
+        self.action_indices = []
         self.reward_seq = []
         self.label_perm = torch.tensor(range(self.n)).unsqueeze(0)
 
@@ -45,8 +46,9 @@ class EpisodeHistory:
         label[action[1]] = tmp
         return label.unsqueeze(0)
 
-    def write(self, action, reward):
+    def write(self, action, action_idx, reward):
         self.action_seq.append(action)
+        self.action_indices.append(action_idx)
         self.reward_seq.append(reward)
         self.label_perm = torch.cat([self.label_perm, self.perm_label(self.label_perm[-1, :], action)], dim=0)
         self.episode_len += 1
@@ -113,7 +115,7 @@ def weight_monitor(model, model_target):
 
 
 class DQN:
-    def __init__(self, problem, gamma=1.0, eps=0.1, lr=1e-4, replay_buffer_max_size=10, cuda_flag=True):
+    def __init__(self, problem, gamma=1.0, eps=0.1, lr=1e-4, replay_buffer_max_size=10, extended_h=False, cuda_flag=True):
 
         self.problem = problem
         self.G = problem.g  # the graph
@@ -123,10 +125,11 @@ class DQN:
         self.hidden_dim = problem.hidden_dim  # hidden dimension for node representation
         self.n = self.k * self.m  # num of nodes
         self.eps = eps  # constant for exploration in dqn
+        self.extended_h = extended_h
         if cuda_flag:
-            self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim).cuda()
+            self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim, extended_h=self.extended_h).cuda()
         else:
-            self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim)
+            self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim, extended_h=self.extended_h)
         self.model_target = dc(self.model)
         self.gamma = gamma  # reward decay const
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
@@ -138,6 +141,7 @@ class DQN:
         self.log.add_log('tot_return')
         self.log.add_log('Q_error')
         self.log.add_log('entropy')
+        self.log.add_log('R_signal')
 
     def run_episode(self, gnn_step=10, episode_len=50, print_info=False):
         sum_r = 0
@@ -145,14 +149,23 @@ class DQN:
         t = 0
 
         ep = EpisodeHistory(state, episode_len)
-
+        # print('init_label:', state.ndata['label'])
+        # print('x:', state.ndata['x'])
         while t < episode_len:
             if self.cuda:
                 G = to_cuda(state)
             else:
                 G = dc(state)
 
-            S_a_encoding, h1, h2, Q_sa = self.model(G, gnn_step=gnn_step, max_step=episode_len, remain_step=episode_len-1-t)
+            # print('init_label:', t, state.ndata['label'])
+
+            legal_actions = self.problem.get_legal_actions()
+
+            S_a_encoding, h1, h2, Q_sa = self.model(G, legal_actions, gnn_step=gnn_step)
+
+            # print('step:', t)
+            # print(G.ndata['label'])
+            # print(Q_sa.argmax())
 
             # record
             h_support1 = h1.nonzero().shape[0]
@@ -178,8 +191,8 @@ class DQN:
             if torch.rand(1) > self.eps:
                 best_action = Q_sa.argmax()
             else:
-                best_action = torch.randint(high=self.n**2, size=(1,)).squeeze()
-            swap_i, swap_j = best_action/self.n, best_action-best_action/self.n*self.n
+                best_action = torch.randint(high=legal_actions.shape[0], size=(1,)).squeeze()
+            swap_i, swap_j = legal_actions[best_action]
 
             # TODO: Re-design reward signal? What about the terminal state?
             state, reward = self.problem.step((swap_i, swap_j))
@@ -191,12 +204,13 @@ class DQN:
             else:
                 R = torch.cat([R, reward.unsqueeze(0)], dim=0)
 
-            ep.write(action=(swap_i, swap_j), reward=R[-1])
+            ep.write(action=(swap_i, swap_j), action_idx=best_action, reward=R[-1])
             t += 1
 
         ep.wrap()
 
         self.experience_replay_buffer.append(ep)
+
         self.log.add_item('tot_return', sum_r.item())
         tot_return = R.sum().item()
 
@@ -226,19 +240,21 @@ class DQN:
                 G_end = dc(to_cuda(self.experience_replay_buffer[episode_i].init_state))
 
             G_start.ndata['label'] = G_start.ndata['label'][self.experience_replay_buffer[episode_i].label_perm[step_j], :]
+            G_start_actions = self.problem.get_legal_actions(state=G_start)
             G_end.ndata['label'] = G_end.ndata['label'][self.experience_replay_buffer[episode_i].label_perm[step_j+q_step], :]
+            G_end_actions = self.problem.get_legal_actions(state=G_end)
 
             # estimate Q-values
-            _, _, _, Q_s1a = self.model(G_start, gnn_step=gnn_step, max_step=episode_len, remain_step=episode_len-1-step_j)
-            _, _, _, Q_s2a = self.model_target(G_end, gnn_step=gnn_step, max_step=episode_len, remain_step=episode_len-1-step_j-q_step)
+            _, _, _, Q_s1a = self.model(G_start, G_start_actions, gnn_step=gnn_step)
+            _, _, _, Q_s2a = self.model_target(G_end, G_end_actions, gnn_step=gnn_step)
 
             # calculate accumulated reward
             swap_i, swap_j = self.experience_replay_buffer[episode_i].action_seq[step_j]
-
+            action_idx = self.experience_replay_buffer[episode_i].action_indices[step_j]
             r = self.experience_replay_buffer[episode_i].reward_seq[step_j: step_j + q_step]
             r = torch.sum(r * torch.tensor([self.gamma ** i for i in range(q_step)]))
             if r > 0:  # amplify positive reward
-                r *= 10
+                r *= 1.0
             # calculate diff between Q-values at start/end
             # if step_j == episode_len - 1:
             #     q = 0
@@ -247,7 +263,7 @@ class DQN:
                 q = self.gamma ** q_step * Q_s2a.max()
             else:
                 q = self.gamma ** q_step * Q_s2a[Q_s1a.argmax()]
-            q -= Q_s1a[swap_i * G_start.number_of_nodes() + swap_j]
+            q -= Q_s1a[action_idx]
 
             R.append(r.unsqueeze(0))
             Q.append(q.unsqueeze(0))
@@ -262,6 +278,7 @@ class DQN:
             R = R.cuda()
         L = torch.pow(R + Q, 2).sum()
         L.backward(retain_graph=True)
+        self.log.add_item('R_signal', R)
         self.Q_err += L.item()
 
         if update_model:
@@ -303,7 +320,12 @@ class DQN:
     def update_target_net(self):
         self.model_target = pickle.loads(pickle.dumps(self.model))
 
-g = generate_G(k=3, m=5, adjacent_reserve=7, hidden_dim=6)
-dqn = DQNet(k=3, m=5, ajr=7, num_head=4, hidden_dim=6).cuda()
-# iter GCN for fixed steps and forward dqn
-S_a_encoding, h1, h2, Q_sa = dqn(to_cuda(g['g']), gnn_step=3, max_step=50, remain_step=0)
+# k, m, n = 3, 3, 9
+# problem = KCut_DGL(k=k, m=m, adjacent_reserve=5, hidden_dim=7)
+# g = problem.g
+# actions = problem.get_legal_actions()
+# dqn = DQNet(k=k, m=m, ajr=5, num_head=4, hidden_dim=7).cuda()
+# # iter GCN for fixed steps and forward dqn
+# S_a_encoding, h1, h2, Q_sa = dqn(to_cuda(g), actions=actions, gnn_step=3)
+
+

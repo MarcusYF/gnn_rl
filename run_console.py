@@ -8,29 +8,34 @@ import torch
 import os
 import gc
 from tqdm import tqdm
+from toy_models.Qiter import vis_g
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 k = 3
 m = 3
 ajr = 5
 hidden_dim = 16
+extended_h = True
 a = 1
 gamma = 0.90
-lr = 1e-3
+lr = 1e-4
 replay_buffer_max_size = 100
-n_epoch = 100
+n_epoch = 2000
 eps = np.linspace(1.0, 0.05, n_epoch/2)
 target_update_step = 5
 batch_size = 100
 grad_accum = 10
-num_episodes = 20
-episode_len = 50
+num_episodes = 50
+episode_len = 10
 gnn_step = 3
 q_step = 1
-ddqn = False
+ddqn = True
 
 problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=hidden_dim)
-alg = DQN(problem, gamma=gamma, eps=0.1, lr=lr, replay_buffer_max_size=replay_buffer_max_size, cuda_flag=True)
+alg = DQN(problem
+          , gamma=gamma, eps=.1, lr=lr
+          , replay_buffer_max_size=replay_buffer_max_size
+          , extended_h=extended_h, cuda_flag=True)
 
 
 def run_dqn():
@@ -47,39 +52,66 @@ def run_dqn():
         if i % target_update_step == target_update_step - 1:
             alg.update_target_net()
         T2 = time.time()
-        # print('Epoch: {}. T: {}'.format(i, np.round(T2-T1,3)))
-        print('Epoch: {}. R: {}. Q error: {}. H: {}. T: {}'.format(i, np.round(log.get_current('tot_return'),2),np.round(log.get_current('Q_error'),3),np.round(log.get_current('entropy'),3),np.round(T2-T1,3)))
+        print('Epoch: {}. R: {}. Q error: {}. H: {}. T: {}'
+              .format(i
+               , np.round(log.get_current('tot_return'), 2)
+               , log.get_current('R_signal')
+               , np.round(log.get_current('Q_error'), 3)
+               , np.round(log.get_current('entropy'), 3)
+               , np.round(T2-T1, 3)))
 
 run_dqn()
 
-def test_model(episode_len=50, explore_prob=0.1):
-    test_problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=hidden_dim)
-    S = test_problem.calc_S()
-    n = test_problem.k * test_problem.m
-    g = to_cuda(test_problem.g)
-    ep = EpisodeHistory(g, max_episode_len=episode_len)
-    for i in range(episode_len):
-        S_a_encoding, h1, h2, Q_sa = alg.model(g, gnn_step=gnn_step, max_step=episode_len, remain_step=episode_len-1-i)
-        # epsilon greedy strategy
-        if torch.rand(1) > explore_prob:
-            best_action = Q_sa.argmax()
-        else:
-            best_action = torch.randint(high=9, size=(1,)).squeeze()
-        swap_i, swap_j = best_action / n, best_action - best_action / n * n
-        state, reward = test_problem.step((swap_i, swap_j))
-        ep.write((swap_i, swap_j), reward)
-        g = to_cuda(state)
 
-    return S, ep
 
-res_S = []
-res_gain = []
-res_ratio = []
-for i in tqdm(range(100)):
-    S, ep = test_model(episode_len=episode_len, explore_prob=.1)
-    res_S.append(S)
-    res_gain.append(sum(ep.reward_seq))
-    res_ratio.append(res_gain[-1]/S)
 
-sum(res_gain)
-sum(res_ratio)
+problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=hidden_dim)
+g = problem.g
+g.ndata['label']
+vis_g(problem, name='toy_models/a1', topo='c')
+S_a_encoding, h1, h2, Q_sa = alg.model(to_cuda(g), gnn_step=gnn_step, max_step=episode_len, remain_step=0)
+problem.reset_label([0,2,0,2,1,1,0,1,2])
+problem.calc_S()
+
+buf = alg.experience_replay_buffer[0]
+g_init = dc(buf.init_state)
+g_init.ndata['label'] # start
+g = dc(g_init)
+
+alg.problem.g.ndata['label'] # end
+
+
+g.ndata['label'] = g.ndata['label'][buf.label_perm[0], :]
+buf.action_seq = [(2, 7), (2, 8), (0, 1), (0, 2), (2, 6)]
+buf.action_indices = [tensor(14), tensor(15), tensor(0), tensor(1), tensor(13)]
+buf.reward_seq = tensor([ 0.4035, -0.4050,  0.5623, -0.2317,  0.3374])
+
+problem.reset_label([2,1,0,2,2,1,0,1,0])
+problem.g.ndata['label']
+#
+_, h1, h2, Q_sa1 = alg.model(to_cuda(problem.g), problem.get_legal_actions(), gnn_step=3)
+Q_sa1.argmax()
+state, reward = problem.step((4,8))
+_, h11, h22, Q_sa11 = alg.model(to_cuda(problem.g), problem.get_legal_actions(), gnn_step=3)
+Q_sa11.argmax()
+
+torch.norm(h2-h22, dim=1)
+
+a = alg.experience_replay_buffer[-1]
+
+_, _, _, Q_sa = alg.model(to_cuda(problem.g), problem.get_legal_actions()[1:2,:], gnn_step=3)
+
+d = {}
+for s in all_state:
+    print(s)
+    problem.reset_label(QtableKey2state(s))
+    act = problem.get_legal_actions()
+    _, _, _, Q_sa = alg.model(to_cuda(problem.g), problem.get_legal_actions(), gnn_step=3)
+    act_i = Q_sa.argmax()
+    d[s] = act[act_i]
+
+b = np.zeros([9, 9])
+for i in d.keys():
+    x = d[i][0]
+    y = d[i][1]
+    b[x,y] += 1

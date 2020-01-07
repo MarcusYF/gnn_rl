@@ -136,8 +136,15 @@ class KCut_DGL():
             self.S = self.calc_S()
         return g
 
-    def get_legal_actions(self):
-        return list(itertools.product(range(self.N), range(self.N)))
+    def get_legal_actions(self, state=None, update=False, action_type='swap', action=None):
+
+        if state is None:
+            state = self.g
+
+        mask = torch.mm(state.ndata['label'], state.ndata['label'].t())
+        legal_actions = torch.triu(1 - mask).nonzero()
+        # return list(itertools.product(range(self.N), range(self.N)))
+        return legal_actions
 
     def calc_swap_delta(self, i, j, i_label, j_label, state=None):
 
@@ -160,7 +167,7 @@ class KCut_DGL():
         if state is None:
             state = self.g
 
-        if action_type=='swap':
+        if action_type == 'swap':
             i, j = action
             i_label, j_label = [(state.ndata['label'][c] > 0).nonzero().item() for c in action]
 
@@ -408,13 +415,16 @@ class PositionalEncoding(nn.Module):
 
 class DQNet(nn.Module):
     # TODO k, m, ajr should be excluded::no generalization
-    def __init__(self, k, m, ajr, num_head, hidden_dim):
+    def __init__(self, k, m, ajr, num_head, hidden_dim, extended_h=False):
         super(DQNet, self).__init__()
         self.k = k
         self.m = m
         self.n = k * m
         self.num_head = num_head
-        self.hidden_dim = hidden_dim# + 2 + k
+        self.extended_h = extended_h
+        self.hidden_dim = hidden_dim
+        if self.extended_h:
+            self.hidden_dim += k
         self.value1 = nn.Linear(num_head*self.hidden_dim, hidden_dim//2)
         self.value2 = nn.Linear(hidden_dim//2, 1)
         self.layers = nn.ModuleList([GCN(k, m, ajr, hidden_dim, F.relu)])
@@ -423,41 +433,46 @@ class DQNet(nn.Module):
                            , dropout=0.0
                            , activate_linear=True)
         # baseline
-        self.t5 = nn.Linear(2*hidden_dim, 1)
-        self.t6 = nn.Linear(hidden_dim, hidden_dim)
-        self.t7 = nn.Linear(2*hidden_dim, hidden_dim)
+        self.t5 = nn.Linear(2*self.hidden_dim, 1)
+        self.t6 = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.t7 = nn.Linear(2*self.hidden_dim, self.hidden_dim)
 
         self.h_residual = []
 
-    def forward(self, g, gnn_step, max_step, remain_step):
+    def forward(self, g, actions=None, gnn_step=3, remain_episode_len=None):
         n = self.n
-        k = self.k
-        m = self.m
         hidden_dim = self.hidden_dim
-        num_head = self.num_head
 
         h = g.ndata['h']
         for i in range(gnn_step):
             for conv in self.layers:
                 h = conv(g, h)
 
-        g.ndata['h'] = h
+        if self.extended_h:
+            g.ndata['h'] = torch.cat([h, g.ndata['label']], dim=1)
+        else:
+            g.ndata['h'] = h
 
-        h_new = torch.cat([h, g.ndata['x'], g.ndata['label']], dim=1)
+        h_new = h
 
-        graph_embedding = self.t6(torch.sum(g.ndata['h'], dim=0)).repeat(n**2, 1)
-
-        q = self.t7(torch.cat([g.ndata['h'].repeat(1, n).view(n * n, hidden_dim), h.repeat(n, 1)], axis=1))
+        if actions is None:
+            # forward the whole action space
+            graph_embedding = self.t6(torch.sum(g.ndata['h'], dim=0)).repeat(n ** 2, 1)
+            q = self.t7(torch.cat([g.ndata['h'].repeat(1, n).view(n * n, hidden_dim), h.repeat(n, 1)], axis=1))
+        else:
+            # forward legal actions
+            graph_embedding = self.t6(torch.sum(g.ndata['h'], dim=0)).repeat(actions.shape[0], 1)
+            q = self.t7(torch.cat([g.ndata['h'][actions[:, 0], :], g.ndata['h'][actions[:, 1], :]], axis=1))
 
         S_a_encoding = torch.cat([graph_embedding, q], axis=1)
 
         Q_sa = self.t5(F.relu(S_a_encoding)).squeeze()
 
-        Q_sa = (Q_sa.view(n, n) + Q_sa.view(n, n).t()).view(n**2)
+        # Q_sa = (Q_sa.view(n, n) + Q_sa.view(n, n).t()).view(n**2)
 
-        return S_a_encoding, g.ndata['h'], h_new, Q_sa
+        return S_a_encoding, h_new, g.ndata['h'], Q_sa
 
-    def forward_mha(self, g, gnn_step, max_step, remain_step):
+    def forward_mha(self, g, gnn_step):
         n = self.n
         k = self.k
         m = self.m
