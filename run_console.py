@@ -41,7 +41,7 @@ alg = DQN(problem
           , time_aware=time_aware
           , cuda_flag=True)
 
-path = 'Models/dqn_3_3_2/'
+path = 'Models/dqn_3_3_3/'
 if not os.path.exists(path):
     os.makedirs(path)
 with open(path + 'dqn_0', 'wb') as model_file:

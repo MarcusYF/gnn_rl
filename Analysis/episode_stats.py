@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from smooth_signal import smooth
 import numpy as np
 import time
+import pickle
 import torch
 import os
 import gc
@@ -11,7 +12,7 @@ from tqdm import tqdm
 from toy_models.Qiter import vis_g
 
 
-def test_model(alg, problem, episode_len=50, explore_prob=0.1):
+def test_model(alg, problem, episode_len=50, explore_prob=0.1, time_aware=False):
     problem.reset()
     test_problem = problem
     S = test_problem.calc_S()
@@ -19,7 +20,10 @@ def test_model(alg, problem, episode_len=50, explore_prob=0.1):
     ep = EpisodeHistory(g, max_episode_len=episode_len)
     for i in range(episode_len):
         legal_actions = test_problem.get_legal_actions()
-        S_a_encoding, h1, h2, Q_sa = alg.model(g, legal_actions, gnn_step=gnn_step)
+        if time_aware:
+            S_a_encoding, h1, h2, Q_sa = alg.model(g, legal_actions, gnn_step=gnn_step, remain_episode_len=episode_len-i-1)
+        else:
+            S_a_encoding, h1, h2, Q_sa = alg.model(g, legal_actions, gnn_step=gnn_step)
         # epsilon greedy strategy
         if torch.rand(1) > explore_prob:
             action_idx = Q_sa.argmax()
@@ -44,11 +48,11 @@ class test_summary():
         self.max_gain_budget = []
         self.max_gain_ratio = []
 
-    def run_test(self, episode_len=10, explore_prob=.0, criteria='end'):
+    def run_test(self, episode_len=50, explore_prob=.0, time_aware=False, criteria='end'):
 
         for i in tqdm(range(self.num_instance)):
             self.problem.reset()
-            s, ep = test_model(self.alg, self.problem, episode_len=episode_len, explore_prob=explore_prob)
+            s, ep = test_model(self.alg, self.problem, episode_len=episode_len, explore_prob=explore_prob, time_aware=time_aware)
             self.S.append(s.item())
             if criteria == 'max':
                 cum_gain = np.cumsum(ep.reward_seq)
@@ -72,13 +76,17 @@ class test_summary():
 # save version 2020.1.6 and continue to train alg
 # alg_first_work_version = dc(alg)
 # alg_q_110 = dc(alg)
-problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
-baseline = test_summary(alg=alg_q_110, problem=problem, num_instance=100)
-baseline.run_test(explore_prob=1.0)
-baseline.show_result()
 
-test1 = test_summary(alg=alg_q_110, problem=problem, num_instance=100)
-test1.run_test()
+with open('Models/dqn_3_3_0/' + 'dqn_' + str(1800), 'rb') as model_file:
+    alg = pickle.load(model_file)
+
+problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
+# baseline = test_summary(alg=alg, problem=problem, num_instance=100)
+# baseline.run_test(explore_prob=1.0)
+# baseline.show_result()
+
+test1 = test_summary(alg=alg, problem=problem, num_instance=100)
+test1.run_test(episode_len=10, time_aware=False)
 test1.show_result()
 
 x = []
