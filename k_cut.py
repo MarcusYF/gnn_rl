@@ -141,9 +141,12 @@ class KCut_DGL():
         if state is None:
             state = self.g
 
-        mask = torch.mm(state.ndata['label'], state.ndata['label'].t())
-        legal_actions = torch.triu(1 - mask).nonzero()
-        # return list(itertools.product(range(self.N), range(self.N)))
+        if action_type=='flip':
+            legal_actions = torch.nonzero(1 - state.ndata['label'])
+        if action_type=='swap':
+            mask = torch.mm(state.ndata['label'], state.ndata['label'].t())
+            legal_actions = torch.triu(1 - mask).nonzero()
+
         return legal_actions
 
     def calc_swap_delta(self, i, j, i_label, j_label, state=None):
@@ -433,17 +436,20 @@ class DQNet(nn.Module):
                            , dropout=0.0
                            , activate_linear=True)
         # baseline
-        self.t5 = nn.Linear(2*self.hidden_dim, 1)
+        self.t5 = nn.Linear(2 * self.hidden_dim, 1)
         self.t6 = nn.Linear(self.hidden_dim, self.hidden_dim)
-        self.t7 = nn.Linear(2*self.hidden_dim, self.hidden_dim)
+        self.t7 = nn.Linear(2 * self.hidden_dim, self.hidden_dim)
+        self.t8 = nn.Linear(self.hidden_dim + self.k, self.hidden_dim)
 
         self.h_residual = []
 
-    def forward(self, g, actions=None, gnn_step=3, remain_episode_len=None):
+    def forward(self, g, actions=None, action_type='swap', gnn_step=3, remain_episode_len=None):
         n = self.n
         hidden_dim = self.hidden_dim
 
         h = g.ndata['h']
+
+        # if in time-aware mode
         if remain_episode_len is not None:
             h[:, -1] += remain_episode_len
 
@@ -451,6 +457,7 @@ class DQNet(nn.Module):
             for conv in self.layers:
                 h = conv(g, h)
 
+        # if use extend h
         if self.extended_h:
             g.ndata['h'] = torch.cat([h, g.ndata['label']], dim=1)
         else:
@@ -458,16 +465,13 @@ class DQNet(nn.Module):
 
         h_new = h
 
-        if actions is None:
-            # forward the whole action space
-            graph_embedding = self.t6(torch.mean(g.ndata['h'], dim=0)).repeat(n ** 2, 1)
-            q = self.t7(torch.cat([g.ndata['h'].repeat(1, n).view(n * n, hidden_dim), h.repeat(n, 1)], axis=1))
-        else:
-            # forward legal actions
-            graph_embedding = self.t6(torch.mean(g.ndata['h'], dim=0)).repeat(actions.shape[0], 1)
-            q = self.t7(torch.cat([g.ndata['h'][actions[:, 0], :], g.ndata['h'][actions[:, 1], :]], axis=1))
+        graph_embedding = self.t6(torch.mean(g.ndata['h'], dim=0)).repeat(actions.shape[0], 1)
+        if action_type == 'flip':
+            q_actions = self.t8(torch.cat([g.ndata['h'][actions[:, 0], :], torch.nn.functional.one_hot(actions[:, 1], g.ndata['label'].shape[1]).float()], axis=1))
+        if action_type == 'swap':
+            q_actions = self.t7(torch.cat([g.ndata['h'][actions[:, 0], :], g.ndata['h'][actions[:, 1], :]], axis=1))
 
-        S_a_encoding = torch.cat([graph_embedding, q], axis=1)
+        S_a_encoding = torch.cat([graph_embedding, q_actions], axis=1)
 
         Q_sa = self.t5(F.relu(S_a_encoding)).squeeze()
 

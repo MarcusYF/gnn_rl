@@ -76,7 +76,7 @@ os.environ['CUDA_VISIBLE_DEVICES'] = gpu
 
 
 problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h)
-alg = DQN(problem
+alg = DQN(problem, action_type='swap'
           , gamma=gamma, eps=.1, lr=lr
           , replay_buffer_max_size=replay_buffer_size
           , extended_h=extend_h
@@ -92,10 +92,10 @@ with open(path + 'dqn_0', 'wb') as model_file:
 def run_dqn(alg):
     for i in tqdm(range(n_epoch)):
 
-        if i % save_ckpt_step == 0:
-            with open(path + 'dqn_'+str(i), 'wb') as model_file:
+        if i % save_ckpt_step == save_ckpt_step - 1:
+            with open(path + 'dqn_'+str(i+1), 'wb') as model_file:
                 pickle.dump(alg, model_file)
-            with open(path + 'dqn_'+str(i), 'rb') as model_file:
+            with open(path + 'dqn_'+str(i+1), 'rb') as model_file:
                 alg = pickle.load(model_file)
 
         if i > len(eps) - 1:

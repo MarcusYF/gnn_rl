@@ -12,7 +12,7 @@ from tqdm import tqdm
 from toy_models.Qiter import vis_g
 
 
-def test_model(alg, problem, episode_len=50, explore_prob=0.1, time_aware=False):
+def test_model(alg, problem, gnn_step=3, episode_len=50, explore_prob=0.1, time_aware=False):
     problem.reset()
     test_problem = problem
     S = test_problem.calc_S()
@@ -77,7 +77,7 @@ class test_summary():
 # alg_first_work_version = dc(alg)
 # alg_q_110 = dc(alg)
 
-with open('Models/dqn_3_3_0/' + 'dqn_' + str(1800), 'rb') as model_file:
+with open('Models/dqn_3_3_0/' + 'dqn_' + str(1400), 'rb') as model_file:
     alg = pickle.load(model_file)
 
 problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
@@ -91,8 +91,8 @@ test1.show_result()
 
 x = []
 for i in range(100):
-    buf = alg_q_110.experience_replay_buffer[i]
-    best_s = np.max(np.cumsum(buf.reward_seq))
+    buf = alg.experience_replay_buffer[i]
+    best_s = max(np.cumsum(buf.reward_seq))
     x.append(sum(buf.reward_seq))
 buf.action_seq
 buf.action_indices = [tensor(14), tensor(15), tensor(0), tensor(1), tensor(13)]

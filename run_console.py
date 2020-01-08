@@ -10,18 +10,19 @@ import pickle
 from tqdm import tqdm
 from toy_models.Qiter import vis_g
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+action_type = 'flip'
 k = 3
 m = 3
 ajr = 5
 hidden_dim = 16
 extended_h = True
-time_aware = True
+time_aware = False
 a = 1
 gamma = 0.90
-lr = 1e-4
+lr = 1e-3
 replay_buffer_max_size = 1000
-n_epoch = 2000
+n_epoch = 2
 save_ckpt_step = 200
 eps = np.linspace(1.0, 0.05, n_epoch/2)
 target_update_step = 5
@@ -34,14 +35,14 @@ q_step = 1
 ddqn = False
 
 problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=hidden_dim)
-alg = DQN(problem
+alg = DQN(problem, action_type=action_type
           , gamma=gamma, eps=.1, lr=lr
           , replay_buffer_max_size=replay_buffer_max_size
           , extended_h=extended_h
           , time_aware=time_aware
           , cuda_flag=True)
 
-path = 'Models/dqn_3_3_3/'
+path = 'Models/dqn_flip_test/'
 if not os.path.exists(path):
     os.makedirs(path)
 with open(path + 'dqn_0', 'wb') as model_file:
@@ -50,10 +51,10 @@ with open(path + 'dqn_0', 'wb') as model_file:
 def run_dqn(alg):
     for i in tqdm(range(n_epoch)):
 
-        if i % save_ckpt_step == 0:
-            with open(path + 'dqn_'+str(i), 'wb') as model_file:
+        if i % save_ckpt_step == save_ckpt_step - 1:
+            with open(path + 'dqn_'+str(i+1), 'wb') as model_file:
                 pickle.dump(alg, model_file)
-            with open(path + 'dqn_'+str(i), 'rb') as model_file:
+            with open(path + 'dqn_'+str(i+1), 'rb') as model_file:
                 alg = pickle.load(model_file)
 
         if i > len(eps) - 1:
@@ -78,55 +79,58 @@ def run_dqn(alg):
 run_dqn(alg)
 
 
-
-
-problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=hidden_dim)
-g = problem.g
-g.ndata['label']
-vis_g(problem, name='toy_models/a1', topo='c')
-S_a_encoding, h1, h2, Q_sa = alg.model(to_cuda(g), gnn_step=gnn_step, max_step=episode_len, remain_step=0)
-problem.reset_label([0,2,0,2,1,1,0,1,2])
-problem.calc_S()
-
-buf = alg.experience_replay_buffer[0]
-g_init = dc(buf.init_state)
-g_init.ndata['label'] # start
-g = dc(g_init)
-
-alg.problem.g.ndata['label'] # end
-
-
-g.ndata['label'] = g.ndata['label'][buf.label_perm[0], :]
-buf.action_seq = [(2, 7), (2, 8), (0, 1), (0, 2), (2, 6)]
-buf.action_indices = [tensor(14), tensor(15), tensor(0), tensor(1), tensor(13)]
-buf.reward_seq = tensor([ 0.4035, -0.4050,  0.5623, -0.2317,  0.3374])
-
-problem.reset_label([2,1,0,2,2,1,0,1,0])
-problem.g.ndata['label']
 #
-_, h1, h2, Q_sa1 = alg.model(to_cuda(problem.g), problem.get_legal_actions(), gnn_step=3)
-Q_sa1.argmax()
-state, reward = problem.step((4,8))
-_, h11, h22, Q_sa11 = alg.model(to_cuda(problem.g), problem.get_legal_actions(), gnn_step=3)
-Q_sa11.argmax()
+#
+# problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=hidden_dim)
+# g = problem.g
+# g.ndata['label']
+# vis_g(problem, name='toy_models/a1', topo='c')
+# S_a_encoding, h1, h2, Q_sa = alg.model(to_cuda(g), gnn_step=gnn_step, max_step=episode_len, remain_step=0)
+# problem.reset_label([0,2,0,2,1,1,0,1,2])
+# problem.calc_S()
+#
+# buf = alg.experience_replay_buffer[0]
+# g_init = dc(buf.init_state)
+# g_init.ndata['label'] # start
+# g = dc(g_init)
+#
+# alg.problem.g.ndata['label'] # end
+#
+#
+# g.ndata['label'] = g.ndata['label'][buf.label_perm[0], :]
+# buf.action_seq = [(2, 7), (2, 8), (0, 1), (0, 2), (2, 6)]
+# buf.action_indices = [tensor(14), tensor(15), tensor(0), tensor(1), tensor(13)]
+# buf.reward_seq = tensor([ 0.4035, -0.4050,  0.5623, -0.2317,  0.3374])
+#
+# problem.reset_label([2,1,0,2,2,1,0,1,0])
+# problem.g.ndata['label']
+# #
+# _, h1, h2, Q_sa1 = alg.model(to_cuda(problem.g), problem.get_legal_actions(), gnn_step=3)
+# Q_sa1.argmax()
+# state, reward = problem.step((4,8))
+# _, h11, h22, Q_sa11 = alg.model(to_cuda(problem.g), problem.get_legal_actions(), gnn_step=3)
+# Q_sa11.argmax()
+#
+# torch.norm(h2-h22, dim=1)
+#
+# a = alg.experience_replay_buffer[-1]
+#
+# _, _, _, Q_sa = alg.model(to_cuda(problem.g), problem.get_legal_actions()[1:2,:], gnn_step=3)
+#
+# d = {}
+# for s in all_state:
+#     print(s)
+#     problem.reset_label(QtableKey2state(s))
+#     act = problem.get_legal_actions()
+#     _, _, _, Q_sa = alg.model(to_cuda(problem.g), problem.get_legal_actions(), gnn_step=3)
+#     act_i = Q_sa.argmax()
+#     d[s] = act[act_i]
+#
+# b = np.zeros([9, 9])
+# for i in d.keys():
+#     x = d[i][0]
+#     y = d[i][1]
+#     b[x,y] += 1
 
-torch.norm(h2-h22, dim=1)
 
-a = alg.experience_replay_buffer[-1]
 
-_, _, _, Q_sa = alg.model(to_cuda(problem.g), problem.get_legal_actions()[1:2,:], gnn_step=3)
-
-d = {}
-for s in all_state:
-    print(s)
-    problem.reset_label(QtableKey2state(s))
-    act = problem.get_legal_actions()
-    _, _, _, Q_sa = alg.model(to_cuda(problem.g), problem.get_legal_actions(), gnn_step=3)
-    act_i = Q_sa.argmax()
-    d[s] = act[act_i]
-
-b = np.zeros([9, 9])
-for i in d.keys():
-    x = d[i][0]
-    y = d[i][1]
-    b[x,y] += 1
