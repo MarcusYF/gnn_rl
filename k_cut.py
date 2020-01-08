@@ -444,6 +444,9 @@ class DQNet(nn.Module):
         hidden_dim = self.hidden_dim
 
         h = g.ndata['h']
+        if remain_episode_len is not None:
+            h[:, -1] += remain_episode_len
+
         for i in range(gnn_step):
             for conv in self.layers:
                 h = conv(g, h)
@@ -457,11 +460,11 @@ class DQNet(nn.Module):
 
         if actions is None:
             # forward the whole action space
-            graph_embedding = self.t6(torch.sum(g.ndata['h'], dim=0)).repeat(n ** 2, 1)
+            graph_embedding = self.t6(torch.mean(g.ndata['h'], dim=0)).repeat(n ** 2, 1)
             q = self.t7(torch.cat([g.ndata['h'].repeat(1, n).view(n * n, hidden_dim), h.repeat(n, 1)], axis=1))
         else:
             # forward legal actions
-            graph_embedding = self.t6(torch.sum(g.ndata['h'], dim=0)).repeat(actions.shape[0], 1)
+            graph_embedding = self.t6(torch.mean(g.ndata['h'], dim=0)).repeat(actions.shape[0], 1)
             q = self.t7(torch.cat([g.ndata['h'][actions[:, 0], :], g.ndata['h'][actions[:, 1], :]], axis=1))
 
         S_a_encoding = torch.cat([graph_embedding, q], axis=1)

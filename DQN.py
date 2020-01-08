@@ -4,6 +4,7 @@ Created on Sun Dec 30 16:20:39 2018
 @author: fy4bc
 """
 import torch
+import random
 import numpy as np
 import dgl
 import torch.nn.functional as F
@@ -38,6 +39,7 @@ class EpisodeHistory:
         self.action_indices = []
         self.reward_seq = []
         self.label_perm = torch.tensor(range(self.n)).unsqueeze(0)
+        self.node_visit_cnt = [0] * self.n
 
     def perm_label(self, label, action):
         label = dc(label)
@@ -51,6 +53,8 @@ class EpisodeHistory:
         self.action_indices.append(action_idx)
         self.reward_seq.append(reward)
         self.label_perm = torch.cat([self.label_perm, self.perm_label(self.label_perm[-1, :], action)], dim=0)
+        self.node_visit_cnt[action[0]] += 1
+        self.node_visit_cnt[action[1]] += 1
         self.episode_len += 1
 
     def wrap(self):
@@ -115,7 +119,7 @@ def weight_monitor(model, model_target):
 
 
 class DQN:
-    def __init__(self, problem, gamma=1.0, eps=0.1, lr=1e-4, replay_buffer_max_size=10, extended_h=False, cuda_flag=True):
+    def __init__(self, problem, gamma=1.0, eps=0.1, lr=1e-4, replay_buffer_max_size=10, extended_h=False, time_aware=False, cuda_flag=True):
 
         self.problem = problem
         self.G = problem.g  # the graph
@@ -134,7 +138,10 @@ class DQN:
         self.gamma = gamma  # reward decay const
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.experience_replay_buffer = []
+        self.buffer_episode_offset = [0]
+        self.buffer_indices = []
         self.replay_buffer_max_size = replay_buffer_max_size
+        self.time_aware = time_aware
         self.cuda = cuda_flag
         self.log = logger()
         self.Q_err = 0  # Q error
@@ -151,7 +158,10 @@ class DQN:
         ep = EpisodeHistory(state, episode_len)
         # print('init_label:', state.ndata['label'])
         # print('x:', state.ndata['x'])
-        while t < episode_len:
+
+        terminal_flag = False
+
+        while t < episode_len and not terminal_flag:
             if self.cuda:
                 G = to_cuda(state)
             else:
@@ -161,7 +171,10 @@ class DQN:
 
             legal_actions = self.problem.get_legal_actions()
 
-            S_a_encoding, h1, h2, Q_sa = self.model(G, legal_actions, gnn_step=gnn_step)
+            if self.time_aware:
+                S_a_encoding, h1, h2, Q_sa = self.model(G, legal_actions, gnn_step=gnn_step, remain_episode_len=episode_len-t-1)
+            else:
+                S_a_encoding, h1, h2, Q_sa = self.model(G, legal_actions, gnn_step=gnn_step)
 
             # print('step:', t)
             # print(G.ndata['label'])
@@ -191,7 +204,7 @@ class DQN:
             if torch.rand(1) > self.eps:
                 best_action = Q_sa.argmax()
             else:
-                best_action = torch.randint(high=legal_actions.shape[0], size=(1,)).squeeze()
+                best_action = torch.randint(high=legal_actions.shape[0], size=(1, )).squeeze()
             swap_i, swap_j = legal_actions[best_action]
 
             # TODO: Re-design reward signal? What about the terminal state?
@@ -205,11 +218,14 @@ class DQN:
                 R = torch.cat([R, reward.unsqueeze(0)], dim=0)
 
             ep.write(action=(swap_i, swap_j), action_idx=best_action, reward=R[-1])
+            terminal_flag = max(ep.node_visit_cnt) > 5
             t += 1
 
         ep.wrap()
 
         self.experience_replay_buffer.append(ep)
+        self.buffer_episode_offset.append(self.buffer_episode_offset[-1] + ep.episode_len)
+        self.buffer_indices.append(list(range(ep.episode_len)))
 
         self.log.add_item('tot_return', sum_r.item())
         tot_return = R.sum().item()
@@ -218,12 +234,14 @@ class DQN:
 
     def sample_from_buffer(self, batch_size, q_step, gnn_step, episode_len, ddqn):
 
+        flat_ep_i = [(x[0], y) for x in zip(range(len(self.buffer_indices)), self.buffer_indices) for y in x[1][:-q_step]]
         # sample #batch_size indices in replay buffer
-        idx = np.random.choice(range(len(self.experience_replay_buffer) * episode_len), size=batch_size, replace=True)
-        # locate samples in each episode
-        batch_idx = [(i // episode_len, i % episode_len) for i in idx]
+        idx_start = random.sample(flat_ep_i, min(batch_size, len(flat_ep_i)))
+
+        # # locate samples in each episode
+        # batch_idx = [(i // episode_len, i % episode_len) for i in idx]
         # locate start/end states for each sample
-        idx_start = [i for i in batch_idx if i[1] % episode_len < episode_len - q_step]
+        # idx_start = [i for i in batch_idx if i[1] < self.experience_replay_buffer[i[0]].episode_len - q_step]
 
         t = 0
         R = []
@@ -245,9 +263,12 @@ class DQN:
             G_end_actions = self.problem.get_legal_actions(state=G_end)
 
             # estimate Q-values
-            _, _, _, Q_s1a = self.model(G_start, G_start_actions, gnn_step=gnn_step)
-            _, _, _, Q_s2a = self.model_target(G_end, G_end_actions, gnn_step=gnn_step)
-
+            if self.time_aware:
+                _, _, _, Q_s1a = self.model(G_start, G_start_actions, gnn_step=gnn_step, remain_episode_len=episode_len-step_j-1)
+                _, _, _, Q_s2a = self.model_target(G_end, G_end_actions, gnn_step=gnn_step, remain_episode_len=episode_len-step_j-1-q_step)
+            else:
+                _, _, _, Q_s1a = self.model(G_start, G_start_actions, gnn_step=gnn_step)
+                _, _, _, Q_s2a = self.model_target(G_end, G_end_actions, gnn_step=gnn_step)
             # calculate accumulated reward
             swap_i, swap_j = self.experience_replay_buffer[episode_i].action_seq[step_j]
             action_idx = self.experience_replay_buffer[episode_i].action_indices[step_j]
@@ -256,13 +277,13 @@ class DQN:
             if r > 0:  # amplify positive reward
                 r *= 1.0
             # calculate diff between Q-values at start/end
-            # if step_j == episode_len - 1:
-            #     q = 0
-            # else:
-            if not ddqn:
-                q = self.gamma ** q_step * Q_s2a.max()
+            if self.time_aware and step_j + q_step == episode_len - 1:
+                q = 0
             else:
-                q = self.gamma ** q_step * Q_s2a[Q_s1a.argmax()]
+                if not ddqn:
+                    q = self.gamma ** q_step * Q_s2a.max()
+                else:
+                    q = self.gamma ** q_step * Q_s2a[Q_s1a.argmax()]
             q -= Q_s1a[action_idx]
 
             R.append(r.unsqueeze(0))
@@ -316,6 +337,10 @@ class DQN:
     def trim_replay_buffer(self):
         if len(self.experience_replay_buffer) > self.replay_buffer_max_size:
             self.experience_replay_buffer = self.experience_replay_buffer[-self.replay_buffer_max_size:]
+            self.buffer_indices = self.buffer_indices[-self.replay_buffer_max_size:]
+            self.buffer_episode_offset = self.buffer_episode_offset[-1-self.replay_buffer_max_size:]
+            shift = self.buffer_episode_offset[0]
+            self.buffer_episode_offset = [offset - shift for offset in self.buffer_episode_offset]
 
     def update_target_net(self):
         self.model_target = pickle.loads(pickle.dumps(self.model))

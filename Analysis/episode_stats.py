@@ -10,9 +10,8 @@ import gc
 from tqdm import tqdm
 from toy_models.Qiter import vis_g
 
-problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
 
-def test_model(problem, episode_len=50, explore_prob=0.1):
+def test_model(alg, problem, episode_len=50, explore_prob=0.1):
     problem.reset()
     test_problem = problem
     S = test_problem.calc_S()
@@ -36,41 +35,79 @@ def test_model(problem, episode_len=50, explore_prob=0.1):
 
 class test_summary():
 
-    def __init__(self, problem=problem, num_instance=100):
+    def __init__(self, alg, problem, num_instance=100):
+        self.alg = alg
         self.problem = problem
         self.num_instance = num_instance
         self.S = []
-        self.gain = []
-        self.gain_ratio = []
+        self.max_gain = []
+        self.max_gain_budget = []
+        self.max_gain_ratio = []
 
-    def run_test(self, episode_len=10, explore_prob=.0):
+    def run_test(self, episode_len=10, explore_prob=.0, criteria='end'):
 
         for i in tqdm(range(self.num_instance)):
             self.problem.reset()
-            s, ep = test_model(self.problem, episode_len=episode_len, explore_prob=explore_prob)
-            self.S.append(s)
-            self.gain.append(sum(ep.reward_seq))
-            self.gain_ratio.append(self.gain[-1] / s)
+            s, ep = test_model(self.alg, self.problem, episode_len=episode_len, explore_prob=explore_prob)
+            self.S.append(s.item())
+            if criteria == 'max':
+                cum_gain = np.cumsum(ep.reward_seq)
+                self.max_gain.append(max(cum_gain).item())
+                self.max_gain_budget.append(1 + np.argmax(cum_gain).item())
+                self.max_gain_ratio.append(self.max_gain[-1] / s)
+            else:
+                self.max_gain.append(sum(ep.reward_seq).item())
+                self.max_gain_budget.append(episode_len)
+                self.max_gain_ratio.append(self.max_gain[-1] / s)
 
     def show_result(self):
 
         print('Avg value of initial S:', np.mean(self.S))
-        print('Avg gain:', np.mean(self.gain))
-        print('Avg percentage gain:', np.mean(self.gain_ratio))
-        print('Percentage of instances with positive gain:', len([x for x in self.gain if x > 0]) / self.num_instance)
+        print('Avg max gain:', np.mean(self.max_gain))
+        print('Avg max gain budget:', np.mean(self.max_gain_budget))
+        print('Var max gain budget:', np.std(self.max_gain_budget))
+        print('Avg percentage max gain:', np.mean(self.max_gain_ratio))
+        print('Percentage of instances with positive gain:', len([x for x in self.max_gain if x > 0]) / self.num_instance)
 
-
+# save version 2020.1.6 and continue to train alg
+# alg_first_work_version = dc(alg)
+# alg_q_110 = dc(alg)
 problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
-baseline = test_summary(problem=problem, num_instance=1000)
+baseline = test_summary(alg=alg_q_110, problem=problem, num_instance=100)
 baseline.run_test(explore_prob=1.0)
 baseline.show_result()
 
-test1 = test_summary(problem=problem, num_instance=1000)
+test1 = test_summary(alg=alg_q_110, problem=problem, num_instance=100)
 test1.run_test()
 test1.show_result()
 
-buf = alg.experience_replay_buffer[0]
-
+x = []
+for i in range(100):
+    buf = alg_q_110.experience_replay_buffer[i]
+    best_s = np.max(np.cumsum(buf.reward_seq))
+    x.append(sum(buf.reward_seq))
 buf.action_seq
 buf.action_indices = [tensor(14), tensor(15), tensor(0), tensor(1), tensor(13)]
 buf.reward_seq = tensor([ 0.4035, -0.4050,  0.5623, -0.2317,  0.3374])
+
+alg.experience_replay_buffer[0].action_seq
+
+np.cumsum(alg.experience_replay_buffer[0].reward_seq)
+
+plt.plot(alg.log.get_log('Q_error'))
+plt.savefig('./Analysis/' + 'q-loss-1' + '.png')
+plt.close()
+
+len(test1.gain)
+
+x = []
+for i in tqdm(range(100)):
+    buf = alg_q_110.experience_replay_buffer[i]
+    x.append(sum(buf.reward_seq))
+np.argmax(x)
+
+buf = alg_q_110.experience_replay_buffer[39]
+buf.action_seq
+buf.reward_seq
+
+

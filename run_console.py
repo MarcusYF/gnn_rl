@@ -6,7 +6,7 @@ import numpy as np
 import time
 import torch
 import os
-import gc
+import pickle
 from tqdm import tqdm
 from toy_models.Qiter import vis_g
 
@@ -16,30 +16,45 @@ m = 3
 ajr = 5
 hidden_dim = 16
 extended_h = True
+time_aware = True
 a = 1
 gamma = 0.90
 lr = 1e-4
-replay_buffer_max_size = 100
+replay_buffer_max_size = 1000
 n_epoch = 2000
+save_ckpt_step = 200
 eps = np.linspace(1.0, 0.05, n_epoch/2)
 target_update_step = 5
 batch_size = 100
 grad_accum = 10
-num_episodes = 50
-episode_len = 10
+num_episodes = 10
+episode_len = 50
 gnn_step = 3
 q_step = 1
-ddqn = True
+ddqn = False
 
 problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=hidden_dim)
 alg = DQN(problem
           , gamma=gamma, eps=.1, lr=lr
           , replay_buffer_max_size=replay_buffer_max_size
-          , extended_h=extended_h, cuda_flag=True)
+          , extended_h=extended_h
+          , time_aware=time_aware
+          , cuda_flag=True)
 
+path = 'Models/dqn_3_3_2/'
+if not os.path.exists(path):
+    os.makedirs(path)
+with open(path + 'dqn_0', 'wb') as model_file:
+    pickle.dump(alg, model_file)
 
-def run_dqn():
+def run_dqn(alg):
     for i in tqdm(range(n_epoch)):
+
+        if i % save_ckpt_step == 0:
+            with open(path + 'dqn_'+str(i), 'wb') as model_file:
+                pickle.dump(alg, model_file)
+            with open(path + 'dqn_'+str(i), 'rb') as model_file:
+                alg = pickle.load(model_file)
 
         if i > len(eps) - 1:
             alg.eps = eps[-1]
@@ -60,7 +75,7 @@ def run_dqn():
                , np.round(log.get_current('entropy'), 3)
                , np.round(T2-T1, 3)))
 
-run_dqn()
+run_dqn(alg)
 
 
 
