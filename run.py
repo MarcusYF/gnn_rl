@@ -22,6 +22,7 @@ from toy_models.Qiter import vis_g
 parser = argparse.ArgumentParser(description="GNN with RL")
 parser.add_argument('--save_folder', default='test')
 parser.add_argument('--gpu', default='0', help="")
+parser.add_argument('--action_type', default='swap', help="")
 parser.add_argument('--k', default=3, help="size of K-cut")
 parser.add_argument('--m', default=3, help="cluster size")
 parser.add_argument('--ajr', default=5, help="")
@@ -49,6 +50,7 @@ args = vars(parser.parse_args())
 
 save_folder = args['save_folder']
 gpu = args['gpu']
+action_type = args['action_type']
 k = int(args['k'])
 m = int(args['m'])
 ajr = int(args['ajr'])
@@ -76,7 +78,7 @@ os.environ['CUDA_VISIBLE_DEVICES'] = gpu
 
 
 problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h)
-alg = DQN(problem, action_type='swap'
+alg = DQN(problem, action_type=action_type
           , gamma=gamma, eps=.1, lr=lr
           , replay_buffer_max_size=replay_buffer_size
           , extended_h=extend_h

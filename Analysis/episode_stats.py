@@ -43,6 +43,7 @@ class test_summary():
         self.alg = alg
         self.problem = problem
         self.num_instance = num_instance
+        self.episodes = []
         self.S = []
         self.max_gain = []
         self.max_gain_budget = []
@@ -54,6 +55,7 @@ class test_summary():
             self.problem.reset()
             s, ep = test_model(self.alg, self.problem, episode_len=episode_len, explore_prob=explore_prob, time_aware=time_aware)
             self.S.append(s.item())
+            self.episodes.append((ep))
             if criteria == 'max':
                 cum_gain = np.cumsum(ep.reward_seq)
                 self.max_gain.append(max(cum_gain).item())
@@ -86,8 +88,18 @@ problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
 # baseline.show_result()
 
 test1 = test_summary(alg=alg, problem=problem, num_instance=100)
-test1.run_test(episode_len=10, time_aware=False)
+test1.run_test(episode_len=50, time_aware=False)
 test1.show_result()
+
+test1.S
+test1.episodes[1].reward_seq
+for i in range(test1.S.__len__()):
+    traj = test1.S[i] + np.cumsum(test1.episodes[i].reward_seq)
+    plt.plot(traj / traj[0])
+    plt.savefig('Analysis/' + 'trajectory_vis' + '.png')
+plt.close()
+
+
 
 x = []
 for i in range(100):
