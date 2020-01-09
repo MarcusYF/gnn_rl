@@ -51,7 +51,7 @@ class test_summary():
 
     def run_test(self, episode_len=50, explore_prob=.0, time_aware=False, criteria='end'):
 
-        for i in tqdm(range(self.num_instance)):
+        for _ in tqdm(range(self.num_instance)):
             self.problem.reset()
             s, ep = test_model(self.alg, self.problem, episode_len=episode_len, explore_prob=explore_prob, time_aware=time_aware)
             self.S.append(s.item())
@@ -79,7 +79,7 @@ class test_summary():
 # alg_first_work_version = dc(alg)
 # alg_q_110 = dc(alg)
 
-with open('Models/dqn_3_3_0/' + 'dqn_' + str(1400), 'rb') as model_file:
+with open('Models/dqn_3_3_1/' + 'dqn_' + str(1000), 'rb') as model_file:
     alg = pickle.load(model_file)
 
 problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
@@ -88,7 +88,7 @@ problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
 # baseline.show_result()
 
 test1 = test_summary(alg=alg, problem=problem, num_instance=100)
-test1.run_test(episode_len=50, time_aware=False)
+test1.run_test(episode_len=20, time_aware=False)
 test1.show_result()
 
 test1.S
@@ -130,4 +130,23 @@ buf = alg_q_110.experience_replay_buffer[39]
 buf.action_seq
 buf.reward_seq
 
+buf = alg.experience_replay_buffer[0]
+buf.action_seq
+buf.reward_seq
 
+problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
+problem.g = dc(buf.init_state)
+[1,2,2,0,0,1,1,0,2]
+problem.calc_S() 4.1640
+[2, 6], [0, 3], [0, 3], [4, 6], [1, 6]
+[ 0.9560, -0.6474,  0.6474, -0.3616,  0.0909, -0.9082,  0.9082, -0.9082,
+         0.9082,  0.6987, -1.0706,  0.3291,  0.9592, -1.1792,  0.3503, -0.3503,
+         0.3503, -0.2162,  0.1179,  0.0304]
+problem.reset_label([1,2,2,0,0,1,1,0,2])
+problem.step((0,3))
+buf.action_indices
+problem.calc_S()
+
+x = []
+for i in range(100):
+    x.append(alg.experience_replay_buffer[i].reward_seq[0])

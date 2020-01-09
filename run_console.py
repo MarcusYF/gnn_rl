@@ -21,15 +21,15 @@ time_aware = False
 a = 1
 gamma = 0.90
 lr = 1e-4
-replay_buffer_max_size = 1000
-n_epoch = 5000
-save_ckpt_step = 1000
+replay_buffer_max_size = 100
+n_epoch = 2000
+save_ckpt_step = 100
 eps = np.linspace(1.0, 0.05, n_epoch/2)
 target_update_step = 5
-batch_size = 200
-grad_accum = 1
+batch_size = 100
+grad_accum = 10
 num_episodes = 10
-episode_len = 20
+episode_len = 50
 gnn_step = 3
 q_step = 1
 ddqn = False
@@ -43,7 +43,7 @@ alg = DQN(problem, action_type=action_type
           , cuda_flag=True)
 
 # path = 'Models/dqn_flip_test/'
-path = 'Models/dqn_3_3_1/'
+path = 'Models/dqn_3_3_0/'
 if not os.path.exists(path):
     os.makedirs(path)
 with open(path + 'dqn_0', 'wb') as model_file:

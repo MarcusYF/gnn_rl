@@ -142,7 +142,7 @@ class DQN:
             self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim, extended_h=self.extended_h).cuda()
         else:
             self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim, extended_h=self.extended_h)
-        self.model.apply(self.weights_init)  # initialize weight
+        # self.model.apply(self.weights_init)  # initialize weight
         self.model_target = dc(self.model)
         self.gamma = gamma  # reward decay const
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
@@ -180,47 +180,46 @@ class DQN:
         while t < episode_len and not terminal_flag:
 
             legal_actions = self.problem.get_legal_actions(action_type=action_type)
-
-            if self.cuda:
-                G = to_cuda(state)
-                legal_actions = legal_actions.cuda()
-            else:
-                G = dc(state)
-
-            if self.time_aware:
-                S_a_encoding, h1, h2, Q_sa = self.model(G, legal_actions, action_type=action_type, gnn_step=gnn_step, remain_episode_len=episode_len-t-1)
-            else:
-                S_a_encoding, h1, h2, Q_sa = self.model(G, legal_actions, action_type=action_type, gnn_step=gnn_step)
-
-            # print('step:', t)
-            # print(G.ndata['label'])
-            # print(Q_sa.argmax())
-
-            # record
-            h_support1 = h1.nonzero().shape[0]
-            h_support2 = h2.nonzero().shape[0]
-            h_mean = h1.sum() / h_support1
-            h_residual = self.model.h_residual
-            q_mean = Q_sa.mean()
-            q_var = Q_sa.std()
-            # model weight
-
-            if print_info and (t % episode_len in (0, episode_len//2, episode_len-1)):
-                print('\nh-nonzero entry: %.0f, %.0f'%(h_support1, h_support2))
-                # print('*****-------------------------------------*****\n')
-                # print(h2)
-                # print('*****-------------------------------------*****\n')
-                print('h-mean: %.5f'%h_mean.item())
-                # print('h-residual: ', ['%.2f'%x.item() for x in h_residual])
-                print('q value-mean: %.5f'%q_mean.item())
-                print('q value-std: %.5f'%q_var.item())
-                print(weight_monitor(self.model, self.model_target))
-
             # epsilon greedy strategy
             if torch.rand(1) > self.eps:
+                if self.cuda:
+                    G = to_cuda(state)
+                    legal_actions = legal_actions.cuda()
+                else:
+                    G = dc(state)
+
+                if self.time_aware:
+                    S_a_encoding, h1, h2, Q_sa = self.model(G, legal_actions, action_type=action_type, gnn_step=gnn_step, remain_episode_len=episode_len-t-1)
+                else:
+                    S_a_encoding, h1, h2, Q_sa = self.model(G, legal_actions, action_type=action_type, gnn_step=gnn_step)
+
+                # print('step:', t)
+                # print(G.ndata['label'])
+                # print(Q_sa.argmax())
+                # record
+                h_support1 = h1.nonzero().shape[0]
+                h_support2 = h2.nonzero().shape[0]
+                h_mean = h1.sum() / h_support1
+                h_residual = self.model.h_residual
+                q_mean = Q_sa.mean()
+                q_var = Q_sa.std()
+                # model weight
+
+                if print_info and (t % episode_len in (0, episode_len//2, episode_len-1)):
+                    print('\nh-nonzero entry: %.0f, %.0f'%(h_support1, h_support2))
+                    # print('*****-------------------------------------*****\n')
+                    # print(h2)
+                    # print('*****-------------------------------------*****\n')
+                    print('h-mean: %.5f'%h_mean.item())
+                    # print('h-residual: ', ['%.2f'%x.item() for x in h_residual])
+                    print('q value-mean: %.5f'%q_mean.item())
+                    print('q value-std: %.5f'%q_var.item())
+                    print(weight_monitor(self.model, self.model_target))
+
                 best_action = Q_sa.argmax()
             else:
                 best_action = torch.randint(high=legal_actions.shape[0], size=(1, )).squeeze()
+
             swap_i, swap_j = legal_actions[best_action]
 
             # TODO: Re-design reward signal? What about the terminal state?
@@ -326,6 +325,9 @@ class DQN:
             R = R.cuda()
         L = torch.pow(R + Q, 2).sum()
         L.backward(retain_graph=True)
+        # print("---------------------------------------------")
+        # print(self.model.layers[0].apply_mod.t4.weight.grad.data)
+        # print("---------------------------------------------")
         self.log.add_item('R_signal', R)
         self.Q_err += L.item()
 
