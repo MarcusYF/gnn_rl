@@ -16,6 +16,7 @@ import torch
 import os
 import pickle
 from tqdm import tqdm
+import json
 from toy_models.Qiter import vis_g
 
 # args
@@ -89,7 +90,7 @@ path = 'Models/' + save_folder + '/'
 if not os.path.exists(path):
     os.makedirs(path)
 with open(path + 'params', 'wb') as model_file:
-    model_file.write(args)
+    model_file.write(json.dumps(args))
 with open(path + 'dqn_0', 'wb') as model_file:
     pickle.dump(alg, model_file)
 
