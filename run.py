@@ -89,7 +89,7 @@ alg = DQN(problem, action_type=action_type
 path = 'Models/' + save_folder + '/'
 if not os.path.exists(path):
     os.makedirs(path)
-with open(path + 'params', 'wb') as model_file:
+with open(path + 'params', 'w') as model_file:
     model_file.write(json.dumps(args))
 with open(path + 'dqn_0', 'wb') as model_file:
     pickle.dump(alg, model_file)
