@@ -10,7 +10,7 @@ import pickle
 from tqdm import tqdm
 from toy_models.Qiter import vis_g
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 action_type = 'swap'
 k = 3
 m = 3
@@ -21,10 +21,10 @@ time_aware = False
 a = 1
 gamma = 0.90
 lr = 1e-4
-replay_buffer_max_size = 100
+replay_buffer_max_size = 100 #
 n_epoch = 2000
 save_ckpt_step = 100
-eps = np.linspace(1.0, 0.05, n_epoch/2)
+eps = np.linspace(1.0, 0.05, n_epoch/2) #
 target_update_step = 5
 batch_size = 100
 grad_accum = 10
@@ -32,7 +32,7 @@ num_episodes = 10
 episode_len = 50
 gnn_step = 3
 q_step = 1
-ddqn = False
+ddqn = True
 
 problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=hidden_dim)
 alg = DQN(problem, action_type=action_type
@@ -43,7 +43,7 @@ alg = DQN(problem, action_type=action_type
           , cuda_flag=True)
 
 # path = 'Models/dqn_flip_test/'
-path = 'Models/dqn_3_3_0/'
+path = 'Models/dqn_0109_ddqn/'
 if not os.path.exists(path):
     os.makedirs(path)
 with open(path + 'dqn_0', 'wb') as model_file:
