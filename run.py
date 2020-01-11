@@ -19,10 +19,19 @@ from tqdm import tqdm
 import json
 from toy_models.Qiter import vis_g
 
+def latestModelVersion(file):
+    versions = [0]
+    for root, dirs, files in os.walk(file):
+        for f in files:
+            if len(f.split('_')) > 1:
+                versions.append(int(f.split('_')[1]))
+    return max(versions)
+
 # args
 parser = argparse.ArgumentParser(description="GNN with RL")
 parser.add_argument('--save_folder', default='test')
 parser.add_argument('--gpu', default='0', help="")
+parser.add_argument('--resume', default=False)
 parser.add_argument('--action_type', default='swap', help="")
 parser.add_argument('--k', default=3, help="size of K-cut")
 parser.add_argument('--m', default=3, help="cluster size")
@@ -51,6 +60,7 @@ args = vars(parser.parse_args())
 
 save_folder = args['save_folder']
 gpu = args['gpu']
+resume = args['resume']
 action_type = args['action_type']
 k = int(args['k'])
 m = int(args['m'])
@@ -77,30 +87,50 @@ ddqn = bool(args['ddqn'])
 
 os.environ['CUDA_VISIBLE_DEVICES'] = gpu
 
-
-problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h)
-alg = DQN(problem, action_type=action_type
-          , gamma=gamma, eps=.1, lr=lr
-          , replay_buffer_max_size=replay_buffer_size
-          , extended_h=extend_h
-          , time_aware=time_aware
-          , cuda_flag=True)
-
+# current working path
 path = 'Models/' + save_folder + '/'
 if not os.path.exists(path):
     os.makedirs(path)
-with open(path + 'params', 'w') as model_file:
-    model_file.write(json.dumps(args))
-with open(path + 'dqn_0', 'wb') as model_file:
-    pickle.dump(alg, model_file)
+
+# problem instances
+problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h)
+
+# model to be trained
+if not resume:
+    model_version = 0
+    alg = DQN(problem, action_type=action_type
+              , gamma=gamma, eps=.1, lr=lr
+              , replay_buffer_max_size=replay_buffer_size
+              , extended_h=extend_h
+              , time_aware=time_aware
+              , cuda_flag=True)
+    with open(path + 'dqn_0', 'wb') as model_file:
+        pickle.dump(alg, model_file)
+else:
+    model_version = latestModelVersion(path)
+    with open(path + 'dqn_' + str(model_version), 'rb') as model_file:
+        alg = pickle.load(model_file)
+
+# record current training settings
+if resume:
+    mode = 'a+'
+else:
+    mode = 'w'
+with open(path + 'params', mode) as params_file:
+    params_file.write(time.strftime("%Y--%m--%d %H:%M:%S", time.localtime()))
+    params_file.write('\n------------------------------------\n')
+    params_file.write(json.dumps(args))
+    params_file.write('\n------------------------------------\n')
+
+
 
 def run_dqn(alg):
     for i in tqdm(range(n_epoch)):
 
         if i % save_ckpt_step == save_ckpt_step - 1:
-            with open(path + 'dqn_'+str(i+1), 'wb') as model_file:
+            with open(path + 'dqn_'+str(model_version+i+1), 'wb') as model_file:
                 pickle.dump(alg, model_file)
-            with open(path + 'dqn_'+str(i+1), 'rb') as model_file:
+            with open(path + 'dqn_'+str(model_version+i+1), 'rb') as model_file:
                 alg = pickle.load(model_file)
 
         if i > len(eps) - 1:
