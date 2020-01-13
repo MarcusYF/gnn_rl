@@ -22,9 +22,9 @@ a = 1
 gamma = 0.90
 lr = 1e-4
 replay_buffer_max_size = 100 #
-n_epoch = 2000
-save_ckpt_step = 100
-eps = np.linspace(1.0, 0.05, n_epoch/2) #
+n_epoch = 5000
+save_ckpt_step = 500
+eps = np.linspace(1.0, 0.1, n_epoch/5) #
 target_update_step = 5
 batch_size = 100
 grad_accum = 10
@@ -43,7 +43,7 @@ alg = DQN(problem, action_type=action_type
           , cuda_flag=True)
 
 # path = 'Models/dqn_flip_test/'
-path = 'Models/dqn_0109_ddqn/'
+path = 'Models/dqn_0112_base_parallel/'
 if not os.path.exists(path):
     os.makedirs(path)
 with open(path + 'dqn_0', 'wb') as model_file:
@@ -73,7 +73,7 @@ def run_dqn(alg):
         print('Epoch: {}. R: {}. Q error: {}. H: {}. T: {}'
               .format(i
                , np.round(log.get_current('tot_return'), 2)
-               , log.get_current('R_signal')
+               # , log.get_current('R_signal')
                , np.round(log.get_current('Q_error'), 3)
                , np.round(log.get_current('entropy'), 3)
                , np.round(T2-T1, 3)))

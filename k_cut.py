@@ -3,6 +3,8 @@ from copy import deepcopy as dc
 import itertools
 import numpy as np
 import dgl
+from dgl.graph import DGLGraph
+from dgl.batched_graph import BatchedDGLGraph
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -107,7 +109,7 @@ class KCut_DGL():
                 S += torch.sum(torch.sqrt(torch.diag(torch.mm(block_ij, block_ij.t()))))
         return S/2
 
-    def reset(self):
+    def reset(self, compute_S=True):
         self.g = generate_G(self.k, self.m, self.adjacent_reserve, self.hidden_dim, random_sample_node=self.random_sample_node, x=self.x, random_init_label=self.random_init_label, label=self.label, a=self.a)['g']
         self.S = self.calc_S()
         return self.g
@@ -444,8 +446,12 @@ class DQNet(nn.Module):
         self.h_residual = []
 
     def forward(self, g, actions=None, action_type='swap', gnn_step=3, remain_episode_len=None):
-        n = self.n
-        hidden_dim = self.hidden_dim
+
+        if isinstance(g, BatchedDGLGraph):
+            batch_size = g.batch_size
+            num_action = actions.shape[0] // batch_size
+        else:
+            num_action = actions.shape[0]
 
         h = g.ndata['h']
 
@@ -465,7 +471,19 @@ class DQNet(nn.Module):
 
         h_new = h
 
-        graph_embedding = self.t6(torch.mean(g.ndata['h'], dim=0)).repeat(actions.shape[0], 1)
+        if isinstance(g, BatchedDGLGraph):
+            graph_embedding = self.t6(dgl.mean_nodes(g, 'h')).repeat(1, num_action).view(num_action * batch_size, -1)
+        else:
+            graph_embedding = self.t6(torch.mean(g.ndata['h'], dim=0)).repeat(num_action, 1)
+
+        if isinstance(g, BatchedDGLGraph):
+            action_mask = torch.tensor(range(0, self.n * batch_size, self.n))\
+                .unsqueeze(1).expand(batch_size, 2)\
+                .repeat(1, num_action)\
+                .view(num_action * batch_size, -1)
+
+            actions += action_mask.cuda()
+
         if action_type == 'flip':
             q_actions = self.t8(torch.cat([g.ndata['h'][actions[:, 0], :], torch.nn.functional.one_hot(actions[:, 1], g.ndata['label'].shape[1]).float()], axis=1))
         if action_type == 'swap':

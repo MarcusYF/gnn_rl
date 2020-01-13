@@ -27,6 +27,10 @@ def latestModelVersion(file):
                 versions.append(int(f.split('_')[1]))
     return max(versions)
 
+# python run.py --gpu=0 --save_folder=dqn_0110_test_extend_h --extend_h=False --n_epoch=5000 --save_ckpt_step=500
+# python run.py --gpu=1 --save_folder=dqn_0110_test_q_step2 --q_step=2 --n_epoch=5000 --save_ckpt_step=500
+# python run.py --gpu=2 --save_folder=dqn_0110_test_gamma95 --gamma=0.95 --n_epoch=5000 --save_ckpt_step=500
+# python run.py --gpu=3 --save_folder=dqn_0113_test_eps
 # args
 parser = argparse.ArgumentParser(description="GNN with RL")
 parser.add_argument('--save_folder', default='test')
@@ -41,11 +45,11 @@ parser.add_argument('--extend_h', default=True)
 parser.add_argument('--time_aware', default=False)
 parser.add_argument('--a', default=1, help="")
 parser.add_argument('--gamma', type=float, default=0.9, help="")
-parser.add_argument('--eps', type=float, default=0.05, help="")
-parser.add_argument('--explore_end_at', type=float, default=0.5, help="")
+parser.add_argument('--eps', type=float, default=0.1, help="")
+parser.add_argument('--explore_end_at', type=float, default=0.2, help="")
 parser.add_argument('--lr', type=float, default=0.0001, help="learning rate")
-parser.add_argument('--n_epoch', default=2000)
-parser.add_argument('--save_ckpt_step', default=200)
+parser.add_argument('--n_epoch', default=5000)
+parser.add_argument('--save_ckpt_step', default=500)
 parser.add_argument('--target_update_step', default=5)
 parser.add_argument('--replay_buffer_size', default=100, help="")
 parser.add_argument('--batch_size', default=100, help='')
@@ -109,6 +113,7 @@ if not resume:
 else:
     model_version = latestModelVersion(path)
     with open(path + 'dqn_' + str(model_version), 'rb') as model_file:
+        # might throw EOF error
         alg = pickle.load(model_file)
 
 # record current training settings
@@ -147,7 +152,7 @@ def run_dqn(alg):
         print('Epoch: {}. R: {}. R_signal: {}. Q error: {}. H: {}. T: {}'
               .format(i
                , np.round(log.get_current('tot_return'), 2)
-               , log.get_current('R_signal')
+               # , log.get_current('R_signal')
                , np.round(log.get_current('Q_error'), 3)
                , np.round(log.get_current('entropy'), 3)
                , np.round(T2-T1, 3)))

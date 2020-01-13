@@ -3,6 +3,7 @@
 Created on Sun Dec 30 16:20:39 2018
 @author: fy4bc
 """
+import time
 import torch
 import random
 import numpy as np
@@ -168,7 +169,7 @@ class DQN:
 
     def run_episode(self, action_type='swap', gnn_step=10, episode_len=50, print_info=False):
         sum_r = 0
-        state = self.problem.reset()
+        state = self.problem.reset(compute_S=False)
         t = 0
 
         ep = EpisodeHistory(state, episode_len, action_type=action_type)
@@ -193,19 +194,20 @@ class DQN:
                 else:
                     S_a_encoding, h1, h2, Q_sa = self.model(G, legal_actions, action_type=action_type, gnn_step=gnn_step)
 
-                # print('step:', t)
-                # print(G.ndata['label'])
-                # print(Q_sa.argmax())
-                # record
-                h_support1 = h1.nonzero().shape[0]
-                h_support2 = h2.nonzero().shape[0]
-                h_mean = h1.sum() / h_support1
-                h_residual = self.model.h_residual
-                q_mean = Q_sa.mean()
-                q_var = Q_sa.std()
-                # model weight
+
 
                 if print_info and (t % episode_len in (0, episode_len//2, episode_len-1)):
+                    # print('step:', t)
+                    # print(G.ndata['label'])
+                    # print(Q_sa.argmax())
+                    # record
+                    h_support1 = h1.nonzero().shape[0]
+                    h_support2 = h2.nonzero().shape[0]
+                    h_mean = h1.sum() / h_support1
+                    h_residual = self.model.h_residual
+                    q_mean = Q_sa.mean()
+                    q_var = Q_sa.std()
+                    # model weight
                     print('\nh-nonzero entry: %.0f, %.0f'%(h_support1, h_support2))
                     # print('*****-------------------------------------*****\n')
                     # print(h2)
@@ -258,19 +260,23 @@ class DQN:
         # locate start/end states for each sample
         # idx_start = [i for i in batch_idx if i[1] < self.experience_replay_buffer[i[0]].episode_len - q_step]
 
-        t = 0
         R = []
-        Q = []
+        begin_state = []
+        end_state = []
+        begin_action = []
+        end_action = []
+        action_indices = []
         for episode_i, step_j in idx_start:
-            # TODO: should run in parallel and avoid the for-loop (need to forward graph batches in dgl)
 
-            # calculate start/end states
-            if self.cuda:
-                G_start = to_cuda(self.experience_replay_buffer[episode_i].init_state)
-                G_end = to_cuda(self.experience_replay_buffer[episode_i].init_state)
-            else:
-                G_start = dc(to_cuda(self.experience_replay_buffer[episode_i].init_state))
-                G_end = dc(to_cuda(self.experience_replay_buffer[episode_i].init_state))
+            action_idx = self.experience_replay_buffer[episode_i].action_indices[step_j]
+            action_indices.append(action_idx)
+
+            r = self.experience_replay_buffer[episode_i].reward_seq[step_j: step_j + q_step]
+            r = torch.sum(r * torch.tensor([self.gamma ** i for i in range(q_step)]))
+            R.append(r.unsqueeze(0))
+
+            G_start = to_cuda(self.experience_replay_buffer[episode_i].init_state)
+            G_end = to_cuda(self.experience_replay_buffer[episode_i].init_state)
 
             if self.action_type == 'swap':
                 G_start.ndata['label'] = G_start.ndata['label'][self.experience_replay_buffer[episode_i].label_perm[step_j], :]
@@ -278,45 +284,107 @@ class DQN:
             if self.action_type == 'flip':
                 G_start.ndata['label'] = torch.nn.functional.one_hot(self.experience_replay_buffer[episode_i].label_perm[step_j], self.k).float()
                 G_end.ndata['label'] = torch.nn.functional.one_hot(self.experience_replay_buffer[episode_i].label_perm[step_j + q_step], self.k).float()
+            G_start.ndata['label'] = G_start.ndata['label'].cuda()
+            G_end.ndata['label'] = G_end.ndata['label'].cuda()
 
             G_start_actions = self.problem.get_legal_actions(state=G_start, action_type=self.action_type)
             G_end_actions = self.problem.get_legal_actions(state=G_end, action_type=self.action_type)
+            G_start_actions = G_start_actions.cuda()
+            G_end_actions = G_end_actions.cuda()
 
-            if self.cuda:
-                G_start.ndata['label'] = G_start.ndata['label'].cuda()
-                G_end.ndata['label'] = G_end.ndata['label'].cuda()
-                G_start_actions = G_start_actions.cuda()
-                G_end_actions = G_end_actions.cuda()
+            begin_state.append(G_start)
+            end_state.append(G_end)
+            begin_action.append(G_start_actions)
+            end_action.append(G_end_actions)
 
-            # estimate Q-values
-            if self.time_aware:
-                _, _, _, Q_s1a = self.model(G_start, G_start_actions, action_type=self.action_type, gnn_step=gnn_step, remain_episode_len=episode_len-step_j-1)
-                _, _, _, Q_s2a = self.model_target(G_end, G_end_actions, action_type=self.action_type, gnn_step=gnn_step, remain_episode_len=episode_len-step_j-1-q_step)
+        # make them batches
+        batch_begin_state = dgl.batch(begin_state)
+        batch_end_state = dgl.batch(end_state)
+        batch_begin_action = torch.cat(begin_action, axis=0)
+        batch_end_action = torch.cat(end_action, axis=0)
+
+        # estimate Q-values
+        if self.time_aware:
+            _, _, _, Q_s1a = self.model(batch_begin_state, batch_begin_action, action_type=self.action_type, gnn_step=gnn_step, remain_episode_len=episode_len-step_j-1)
+            _, _, _, Q_s2a = self.model_target(batch_end_state, batch_end_action, action_type=self.action_type, gnn_step=gnn_step, remain_episode_len=episode_len-step_j-1-q_step)
+        else:
+            _, _, _, Q_s1a = self.model(batch_begin_state, batch_begin_action, action_type=self.action_type, gnn_step=gnn_step)
+            _, _, _, Q_s2a = self.model_target(batch_end_state, batch_end_action, action_type=self.action_type, gnn_step=gnn_step)
+
+        # calculate diff between Q-values at start/end
+        action_mask = torch.tensor(range(0, G_start_actions.shape[0] * batch_size, G_start_actions.shape[0])).cuda()
+        if self.time_aware and step_j + q_step == episode_len - 1:
+            q = 0
+        else:
+            if not ddqn:
+                q = self.gamma ** q_step * Q_s2a.view(-1, G_start_actions.shape[0]).max(dim=1).values
             else:
-                _, _, _, Q_s1a = self.model(G_start, G_start_actions, action_type=self.action_type, gnn_step=gnn_step)
-                _, _, _, Q_s2a = self.model_target(G_end, G_end_actions, action_type=self.action_type, gnn_step=gnn_step)
+                q = self.gamma ** q_step * Q_s2a[action_mask + Q_s1a.view(-1, G_start_actions.shape[0]).argmax(dim=1)]
 
-            # calculate accumulated reward
-            swap_i, swap_j = self.experience_replay_buffer[episode_i].action_seq[step_j]
-            action_idx = self.experience_replay_buffer[episode_i].action_indices[step_j]
-            r = self.experience_replay_buffer[episode_i].reward_seq[step_j: step_j + q_step]
-            r = torch.sum(r * torch.tensor([self.gamma ** i for i in range(q_step)]))
+        q -= Q_s1a[action_mask + torch.tensor(action_indices).cuda()]
 
-            # calculate diff between Q-values at start/end
-            if self.time_aware and step_j + q_step == episode_len - 1:
-                q = 0
-            else:
-                if not ddqn:
-                    q = self.gamma ** q_step * Q_s2a.max()
-                else:
-                    q = self.gamma ** q_step * Q_s2a[Q_s1a.argmax()]
-            q -= Q_s1a[action_idx]
+        Q = q.unsqueeze(0)
 
-            R.append(r.unsqueeze(0))
-            Q.append(q.unsqueeze(0))
+        return torch.cat(R), Q
 
-            t += 1
-        return torch.cat(R), torch.cat(Q)
+
+        # for episode_i, step_j in idx_start:
+        #     # TODO: should run in parallel and avoid the for-loop (need to forward graph batches in dgl)
+        #
+        #     # calculate start/end states
+        #     if self.cuda:
+        #         G_start = to_cuda(self.experience_replay_buffer[episode_i].init_state)
+        #         G_end = to_cuda(self.experience_replay_buffer[episode_i].init_state)
+        #     else:
+        #         G_start = dc(to_cuda(self.experience_replay_buffer[episode_i].init_state))
+        #         G_end = dc(to_cuda(self.experience_replay_buffer[episode_i].init_state))
+        #
+        #     if self.action_type == 'swap':
+        #         G_start.ndata['label'] = G_start.ndata['label'][self.experience_replay_buffer[episode_i].label_perm[step_j], :]
+        #         G_end.ndata['label'] = G_end.ndata['label'][self.experience_replay_buffer[episode_i].label_perm[step_j + q_step], :]
+        #     if self.action_type == 'flip':
+        #         G_start.ndata['label'] = torch.nn.functional.one_hot(self.experience_replay_buffer[episode_i].label_perm[step_j], self.k).float()
+        #         G_end.ndata['label'] = torch.nn.functional.one_hot(self.experience_replay_buffer[episode_i].label_perm[step_j + q_step], self.k).float()
+        #
+        #     G_start_actions = self.problem.get_legal_actions(state=G_start, action_type=self.action_type)
+        #     G_end_actions = self.problem.get_legal_actions(state=G_end, action_type=self.action_type)
+        #
+        #     if self.cuda:
+        #         G_start.ndata['label'] = G_start.ndata['label'].cuda()
+        #         G_end.ndata['label'] = G_end.ndata['label'].cuda()
+        #         G_start_actions = G_start_actions.cuda()
+        #         G_end_actions = G_end_actions.cuda()
+        #
+        #     # estimate Q-values
+        #     if self.time_aware:
+        #         _, _, _, Q_s1a = self.model(G_start, G_start_actions, action_type=self.action_type, gnn_step=gnn_step, remain_episode_len=episode_len-step_j-1)
+        #         _, _, _, Q_s2a = self.model_target(G_end, G_end_actions, action_type=self.action_type, gnn_step=gnn_step, remain_episode_len=episode_len-step_j-1-q_step)
+        #     else:
+        #         _, _, _, Q_s1a = self.model(G_start, G_start_actions, action_type=self.action_type, gnn_step=gnn_step)
+        #         _, _, _, Q_s2a = self.model_target(G_end, G_end_actions, action_type=self.action_type, gnn_step=gnn_step)
+        #
+        #     # calculate accumulated reward
+        #     swap_i, swap_j = self.experience_replay_buffer[episode_i].action_seq[step_j]
+        #     action_idx = self.experience_replay_buffer[episode_i].action_indices[step_j]
+        #     r = self.experience_replay_buffer[episode_i].reward_seq[step_j: step_j + q_step]
+        #     r = torch.sum(r * torch.tensor([self.gamma ** i for i in range(q_step)]))
+        #
+        #     # calculate diff between Q-values at start/end
+        #     if self.time_aware and step_j + q_step == episode_len - 1:
+        #         q = 0
+        #     else:
+        #         if not ddqn:
+        #             q = self.gamma ** q_step * Q_s2a.max()
+        #         else:
+        #             q = self.gamma ** q_step * Q_s2a[Q_s1a.argmax()]
+        #     q -= Q_s1a[action_idx]
+        #
+        #     R.append(r.unsqueeze(0))
+        #     Q.append(q.unsqueeze(0))
+        #
+        #     t += 1
+
+        # return torch.cat(R), torch.cat(Q)
 
 
     def back_loss(self, R, Q, update_model=True):
@@ -328,7 +396,7 @@ class DQN:
         # print("---------------------------------------------")
         # print(self.model.layers[0].apply_mod.t4.weight.grad.data)
         # print("---------------------------------------------")
-        self.log.add_item('R_signal', R)
+        # self.log.add_item('R_signal', R)
         self.Q_err += L.item()
 
         if update_model:
@@ -349,14 +417,19 @@ class DQN:
         :return:
         """
         mean_return = 0
+
         for i in range(num_episodes):
-            [_, tot_return] = self.run_episode(action_type=self.action_type, gnn_step=gnn_step, episode_len=episode_len, print_info=(i % num_episodes == num_episodes - 1))
+            # 0.2s
+            print_info = False # (i % num_episodes == num_episodes - 1)
+            [_, tot_return] = self.run_episode(action_type=self.action_type, gnn_step=gnn_step, episode_len=episode_len, print_info=print_info)
             mean_return = mean_return + tot_return
         # trim experience replay buffer
         self.trim_replay_buffer()
 
         for i in range(grad_accum):
+            # 2s
             R, Q = self.sample_from_buffer(batch_size=batch_size, q_step=q_step, gnn_step=gnn_step, episode_len=episode_len, ddqn=ddqn)
+            # 0.5s
             self.back_loss(R, Q, update_model=(i % grad_accum == grad_accum - 1))
             del R, Q
             torch.cuda.empty_cache()
@@ -373,13 +446,3 @@ class DQN:
 
     def update_target_net(self):
         self.model_target = pickle.loads(pickle.dumps(self.model))
-
-# k, m, n = 3, 3, 9
-# problem = KCut_DGL(k=k, m=m, adjacent_reserve=5, hidden_dim=7)
-# g = problem.g
-# actions = problem.get_legal_actions()
-# dqn = DQNet(k=k, m=m, ajr=5, num_head=4, hidden_dim=7).cuda()
-# # iter GCN for fixed steps and forward dqn
-# S_a_encoding, h1, h2, Q_sa = dqn(to_cuda(g), actions=actions, gnn_step=3)
-
-
