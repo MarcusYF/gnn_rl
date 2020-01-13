@@ -24,10 +24,11 @@ lr = 1e-4
 replay_buffer_max_size = 100 #
 n_epoch = 5000
 save_ckpt_step = 500
-eps = np.linspace(1.0, 0.1, n_epoch/5) #
+eps = np.linspace(0.1, 0.1, n_epoch/5) #
 target_update_step = 5
-batch_size = 100
-grad_accum = 10
+batch_size = 490
+grad_accum = 1
+sample_batch_episode = True
 num_episodes = 10
 episode_len = 50
 gnn_step = 3
@@ -43,7 +44,7 @@ alg = DQN(problem, action_type=action_type
           , cuda_flag=True)
 
 # path = 'Models/dqn_flip_test/'
-path = 'Models/dqn_0112_base_parallel/'
+path = 'Models/dqn_0113_base_parallel_test_grad_accum/'
 if not os.path.exists(path):
     os.makedirs(path)
 with open(path + 'dqn_0', 'wb') as model_file:
@@ -66,7 +67,7 @@ def run_dqn(alg):
 
         T1 = time.time()
         # TODO memory usage :: episode_len * num_episodes * hidden_dim
-        log = alg.train_dqn(batch_size=batch_size, grad_accum=grad_accum, num_episodes=num_episodes, episode_len=episode_len, gnn_step=gnn_step, q_step=q_step, ddqn=ddqn)
+        log = alg.train_dqn(sample_batch_episode=sample_batch_episode, batch_size=batch_size, grad_accum=grad_accum, num_episodes=num_episodes, episode_len=episode_len, gnn_step=gnn_step, q_step=q_step, ddqn=ddqn)
         if i % target_update_step == target_update_step - 1:
             alg.update_target_net()
         T2 = time.time()

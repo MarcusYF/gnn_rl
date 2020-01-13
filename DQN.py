@@ -249,6 +249,74 @@ class DQN:
 
         return R, tot_return
 
+    def run_batch_episode(self, action_type='swap', gnn_step=10, episode_len=50, batch_size=10, print_info=False):
+
+        sum_r = 0
+        state = self.problem.gen_batch_graph(batch_size=batch_size)
+        t = 0
+
+        ep = [EpisodeHistory(state[i], episode_len, action_type=action_type) for i in range(batch_size)]
+
+        num_actions = self.problem.get_legal_actions(action_type=action_type).shape[0]
+        action_mask = torch.tensor(range(0, num_actions * batch_size, num_actions)).cuda()
+
+        while t < episode_len:
+
+            legal_actions = [self.problem.get_legal_actions(state=state[i], action_type=action_type).cuda() for i in range(batch_size)]
+
+            batch_legal_actions = torch.cat(legal_actions, axis=0)
+
+            # epsilon greedy strategy
+            if torch.rand(1) > self.eps:
+
+                G = [to_cuda(state[i]) for i in range(batch_size)]
+
+                batch_G = dgl.batch(G)
+
+                if self.time_aware:
+                    S_a_encoding, h1, h2, Q_sa = self.model(batch_G, batch_legal_actions, action_type=action_type, gnn_step=gnn_step, remain_episode_len=episode_len-t-1)
+                else:
+                    S_a_encoding, h1, h2, Q_sa = self.model(batch_G, batch_legal_actions, action_type=action_type, gnn_step=gnn_step)
+
+                if print_info and (t % episode_len in (0, episode_len//2, episode_len-1)):
+                    h_support1 = h1.nonzero().shape[0]
+                    h_support2 = h2.nonzero().shape[0]
+                    h_mean = h1.sum() / h_support1
+                    q_mean = Q_sa.mean()
+                    q_var = Q_sa.std()
+                    # model weight
+                    print('\nh-nonzero entry: %.0f, %.0f'%(h_support1, h_support2))
+                    print('h-mean: %.5f'%h_mean.item())
+                    print('q value-mean: %.5f'%q_mean.item())
+                    print('q value-std: %.5f'%q_var.item())
+                    print(weight_monitor(self.model, self.model_target))
+
+                best_actions = action_mask + Q_sa.view(-1, num_actions).argmax(dim=1)
+            else:
+                best_actions = action_mask + torch.randint(high=num_actions, size=(batch_size, )).squeeze().cuda()
+
+            swap_ij = batch_legal_actions[best_actions]
+
+            # TODO: Re-design reward signal? What about the terminal state?
+            state_reward_tuples = [self.problem.step(action=swap_ij[k, :], action_type=action_type, state=state[k]) for k in range(batch_size)]
+
+            R = [state_reward[1].unsqueeze(0) for state_reward in state_reward_tuples]
+            sum_r += sum(R)
+
+            [ep[k].write(action=swap_ij[k, :], action_idx=best_actions[k]-action_mask[k], reward=R[k]) for k in range(batch_size)]
+
+            t += 1
+
+        [e.wrap() for e in ep]
+
+        self.experience_replay_buffer.extend(ep)
+        self.buffer_episode_offset.extend([self.buffer_episode_offset[-1] + ep[0].episode_len * k for k in range(batch_size)])
+        self.buffer_indices.append(list(range(ep[0].episode_len)) * batch_size)
+        self.log.add_item('tot_return', sum_r.item())
+        tot_return = sum(R).item()
+
+        return R, tot_return
+
     def sample_from_buffer(self, batch_size, q_step, gnn_step, episode_len, ddqn):
 
         flat_ep_i = [(x[0], y) for x in zip(range(len(self.buffer_indices)), self.buffer_indices) for y in x[1][:-q_step]]
@@ -406,7 +474,7 @@ class DQN:
             self.Q_err = 0
             self.log.add_item('entropy', 0)
 
-    def train_dqn(self, batch_size=16, grad_accum=10, num_episodes=10, episode_len=50, gnn_step=10, q_step=1, ddqn=False):
+    def train_dqn(self, sample_batch_episode=True, batch_size=16, grad_accum=10, num_episodes=10, episode_len=50, gnn_step=10, q_step=1, ddqn=False):
         """
         :param batch_size:
         :param num_episodes:
@@ -416,13 +484,17 @@ class DQN:
         :param ddqn: train in ddqn mode
         :return:
         """
-        mean_return = 0
+        print_info = False  # (i % num_episodes == num_episodes - 1)
+        if sample_batch_episode:
+            self.run_batch_episode(action_type=self.action_type, gnn_step=gnn_step, episode_len=episode_len,
+                                   batch_size=num_episodes, print_info=print_info)
+        else:
+            mean_return = 0
+            for i in range(num_episodes):
+                # 0.2s
+                [_, tot_return] = self.run_episode(action_type=self.action_type, gnn_step=gnn_step, episode_len=episode_len, print_info=print_info)
+                mean_return = mean_return + tot_return
 
-        for i in range(num_episodes):
-            # 0.2s
-            print_info = False # (i % num_episodes == num_episodes - 1)
-            [_, tot_return] = self.run_episode(action_type=self.action_type, gnn_step=gnn_step, episode_len=episode_len, print_info=print_info)
-            mean_return = mean_return + tot_return
         # trim experience replay buffer
         self.trim_replay_buffer()
 

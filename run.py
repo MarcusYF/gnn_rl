@@ -30,7 +30,8 @@ def latestModelVersion(file):
 # python run.py --gpu=0 --save_folder=dqn_0110_test_extend_h --extend_h=False --n_epoch=5000 --save_ckpt_step=500
 # python run.py --gpu=1 --save_folder=dqn_0110_test_q_step2 --q_step=2 --n_epoch=5000 --save_ckpt_step=500
 # python run.py --gpu=2 --save_folder=dqn_0110_test_gamma95 --gamma=0.95 --n_epoch=5000 --save_ckpt_step=500
-# python run.py --gpu=3 --save_folder=dqn_0113_test_eps --eps=0.3
+# python run.py --gpu=1 --save_folder=dqn_0113_test_eps1 --explore_end_at=0.6 --eps=0.1
+# python run.py --gpu=0 --save_folder=dqn_0113_test_eps0 --eps=0.3
 # args
 parser = argparse.ArgumentParser(description="GNN with RL")
 parser.add_argument('--save_folder', default='test')
@@ -52,8 +53,9 @@ parser.add_argument('--n_epoch', default=5000)
 parser.add_argument('--save_ckpt_step', default=500)
 parser.add_argument('--target_update_step', default=5)
 parser.add_argument('--replay_buffer_size', default=100, help="")
-parser.add_argument('--batch_size', default=100, help='')
-parser.add_argument('--grad_accum', default=10, help='')
+parser.add_argument('--batch_size', default=490, help='')
+parser.add_argument('--grad_accum', default=1, help='')
+parser.add_argument('--sample_batch_episode', default=True, help='')
 parser.add_argument('--n_episode', default=10, help='')
 parser.add_argument('--episode_len', default=50, help='')
 parser.add_argument('--gnn_step', default=3, help='')
@@ -79,6 +81,7 @@ replay_buffer_size = int(args['replay_buffer_size'])
 target_update_step = int(args['target_update_step'])
 batch_size = int(args['batch_size'])
 grad_accum = int(args['grad_accum'])
+sample_batch_episode = bool(args['sample_batch_episode'])
 n_episode = int(args['n_episode'])
 episode_len = int(args['episode_len'])
 gnn_step = int(args['gnn_step'])
@@ -145,7 +148,7 @@ def run_dqn(alg):
 
         T1 = time.time()
         # TODO memory usage :: episode_len * num_episodes * hidden_dim
-        log = alg.train_dqn(batch_size=batch_size, grad_accum=grad_accum, num_episodes=n_episode, episode_len=episode_len, gnn_step=gnn_step, q_step=q_step, ddqn=ddqn)
+        log = alg.train_dqn(sample_batch_episode=sample_batch_episode, batch_size=batch_size, grad_accum=grad_accum, num_episodes=n_episode, episode_len=episode_len, gnn_step=gnn_step, q_step=q_step, ddqn=ddqn)
         if i % target_update_step == target_update_step - 1:
             alg.update_target_net()
         T2 = time.time()

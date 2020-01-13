@@ -109,6 +109,9 @@ class KCut_DGL():
                 S += torch.sum(torch.sqrt(torch.diag(torch.mm(block_ij, block_ij.t()))))
         return S/2
 
+    def gen_batch_graph(self, batch_size):
+        return [generate_G(self.k, self.m, self.adjacent_reserve, self.hidden_dim, random_sample_node=self.random_sample_node, x=self.x, random_init_label=self.random_init_label, label=self.label, a=self.a)['g'] for i in range(batch_size)]
+
     def reset(self, compute_S=True):
         self.g = generate_G(self.k, self.m, self.adjacent_reserve, self.hidden_dim, random_sample_node=self.random_sample_node, x=self.x, random_init_label=self.random_init_label, label=self.label, a=self.a)['g']
         self.S = self.calc_S()
@@ -482,12 +485,14 @@ class DQNet(nn.Module):
                 .repeat(1, num_action)\
                 .view(num_action * batch_size, -1)
 
-            actions += action_mask.cuda()
+            actions_ = actions + action_mask.cuda()
+        else:
+            actions_ = actions
 
         if action_type == 'flip':
-            q_actions = self.t8(torch.cat([g.ndata['h'][actions[:, 0], :], torch.nn.functional.one_hot(actions[:, 1], g.ndata['label'].shape[1]).float()], axis=1))
+            q_actions = self.t8(torch.cat([g.ndata['h'][actions_[:, 0], :], torch.nn.functional.one_hot(actions_[:, 1], g.ndata['label'].shape[1]).float()], axis=1))
         if action_type == 'swap':
-            q_actions = self.t7(torch.cat([g.ndata['h'][actions[:, 0], :], g.ndata['h'][actions[:, 1], :]], axis=1))
+            q_actions = self.t7(torch.cat([g.ndata['h'][actions_[:, 0], :], g.ndata['h'][actions_[:, 1], :]], axis=1))
 
         S_a_encoding = torch.cat([graph_embedding, q_actions], axis=1)
 
