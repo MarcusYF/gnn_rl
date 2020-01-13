@@ -30,7 +30,7 @@ def latestModelVersion(file):
 # python run.py --gpu=0 --save_folder=dqn_0110_test_extend_h --extend_h=False --n_epoch=5000 --save_ckpt_step=500
 # python run.py --gpu=1 --save_folder=dqn_0110_test_q_step2 --q_step=2 --n_epoch=5000 --save_ckpt_step=500
 # python run.py --gpu=2 --save_folder=dqn_0110_test_gamma95 --gamma=0.95 --n_epoch=5000 --save_ckpt_step=500
-# python run.py --gpu=3 --save_folder=dqn_0113_test_eps
+# python run.py --gpu=3 --save_folder=dqn_0113_test_eps --eps=0.3
 # args
 parser = argparse.ArgumentParser(description="GNN with RL")
 parser.add_argument('--save_folder', default='test')
@@ -149,7 +149,7 @@ def run_dqn(alg):
         if i % target_update_step == target_update_step - 1:
             alg.update_target_net()
         T2 = time.time()
-        print('Epoch: {}. R: {}. R_signal: {}. Q error: {}. H: {}. T: {}'
+        print('Epoch: {}. R: {}. Q error: {}. H: {}. T: {}'
               .format(i
                , np.round(log.get_current('tot_return'), 2)
                # , log.get_current('R_signal')
