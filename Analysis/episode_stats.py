@@ -86,7 +86,6 @@ class test_summary():
 
 # buf = alg.experience_replay_buffer[-1]
 #
-# problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
 # g1 = problem.g
 # g1a = problem.get_legal_actions()
 # problem.reset()
@@ -111,7 +110,11 @@ class test_summary():
 # baseline = test_summary(alg=alg, problem=problem, num_instance=100)
 # baseline.run_test(explore_prob=1.0)
 # baseline.show_result()
-
+folder = 'Models/dqn_0114_base/'
+# folder = 'Models/dqn_test_not_sample_batch_episode/'
+with open(folder + 'dqn_' + str(5500), 'rb') as model_file:
+    alg = pickle.load(model_file)
+problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
 test1 = test_summary(alg=alg, problem=problem, num_instance=100)
 test1.run_test(episode_len=50, explore_prob=0.0, time_aware=False)
 test1.show_result()

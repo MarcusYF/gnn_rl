@@ -13,8 +13,11 @@ from toy_models.Qiter import vis_g
 # import Analysis.episode_stats.test_summary,test_model
 
 # folder = 'Models/dqn_0113_test_qstep/'
-folder = 'Models/dqn_test_not_sample_batch_episode/'
-with open(folder + 'dqn_' + str(500), 'rb') as model_file:
+folder = 'Models/dqn_0114_base/'
+folder = 'Models/dqn_0113_cutloop/'
+folder = 'Models/dqn_0113_test_eps1/'
+# folder = 'Models/dqn_test_not_sample_batch_episode/'
+with open(folder + 'dqn_' + str(4500), 'rb') as model_file:
     alg = pickle.load(model_file)
 
 x = []

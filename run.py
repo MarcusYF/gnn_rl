@@ -32,7 +32,7 @@ def latestModelVersion(file):
 # python run.py --gpu=2 --save_folder=dqn_0110_test_gamma95 --gamma=0.95 --n_epoch=5000 --save_ckpt_step=500
 # python run.py --gpu=1 --save_folder=dqn_0113_test_eps1 --explore_end_at=0.6 --eps=0.1
 # python run.py --gpu=0 --save_folder=dqn_0113_test_eps0 --eps=0.3
-# python run.py --gpu=0 --save_folder=dqn_test_sample_batch_episode
+# python run.py --gpu=3 --save_folder=dqn_0113_cutloop --explore_end_at=0.1
 # args
 parser = argparse.ArgumentParser(description="GNN with RL")
 parser.add_argument('--save_folder', default='test')
@@ -50,8 +50,8 @@ parser.add_argument('--gamma', type=float, default=0.9, help="")
 parser.add_argument('--eps', type=float, default=0.1, help="")
 parser.add_argument('--explore_end_at', type=float, default=0.5, help="")
 parser.add_argument('--lr', type=float, default=0.0001, help="learning rate")
-parser.add_argument('--n_epoch', default=10000)
-parser.add_argument('--save_ckpt_step', default=1000)
+parser.add_argument('--n_epoch', default=5000)
+parser.add_argument('--save_ckpt_step', default=500)
 parser.add_argument('--target_update_step', default=5)
 parser.add_argument('--replay_buffer_size', default=100, help="")
 parser.add_argument('--batch_size', default=1000, help='')

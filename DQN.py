@@ -232,12 +232,12 @@ class DQN:
 
             swap_i, swap_j = legal_actions[best_action]
 
-            # TODO: Re-design reward signal? What about the terminal state?
-            trial = 0
-            while ep.check_loop(action=(swap_i, swap_j)) and trial < 10:
-                random_action = torch.randint(high=legal_actions.shape[0], size=(1, )).squeeze()
-                swap_i, swap_j = legal_actions[random_action]
-                trial += 1
+            # # TODO: Re-design reward signal? What about the terminal state?
+            # trial = 0
+            # while ep.check_loop(action=(swap_i, swap_j)) and trial < 10:
+            #     random_action = torch.randint(high=legal_actions.shape[0], size=(1, )).squeeze()
+            #     swap_i, swap_j = legal_actions[random_action]
+            #     trial += 1
 
             state, reward = self.problem.step((swap_i, swap_j), action_type=action_type)
 
