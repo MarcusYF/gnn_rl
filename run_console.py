@@ -22,18 +22,18 @@ a = 1
 gamma = 0.90
 lr = 1e-4
 replay_buffer_max_size = 100 #
-n_epoch = 5000
+n_epoch = 10000
 save_ckpt_step = 500
-eps = np.linspace(0.1, 0.1, n_epoch/5) #
+eps = np.linspace(0.5, 0.1, 5000) #
 target_update_step = 5
-batch_size = 490
+batch_size = 1000
 grad_accum = 1
-sample_batch_episode = True
+sample_batch_episode = False
 num_episodes = 10
 episode_len = 50
 gnn_step = 3
 q_step = 1
-ddqn = True
+ddqn = False
 
 problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=hidden_dim)
 alg = DQN(problem, action_type=action_type
@@ -44,7 +44,7 @@ alg = DQN(problem, action_type=action_type
           , cuda_flag=True)
 
 # path = 'Models/dqn_flip_test/'
-path = 'Models/dqn_0113_base_parallel_test_grad_accum/'
+path = 'Models/dqn_0114_base/'
 if not os.path.exists(path):
     os.makedirs(path)
 with open(path + 'dqn_0', 'wb') as model_file:
@@ -74,7 +74,6 @@ def run_dqn(alg):
         print('Epoch: {}. R: {}. Q error: {}. H: {}. T: {}'
               .format(i
                , np.round(log.get_current('tot_return'), 2)
-               # , log.get_current('R_signal')
                , np.round(log.get_current('Q_error'), 3)
                , np.round(log.get_current('entropy'), 3)
                , np.round(T2-T1, 3)))

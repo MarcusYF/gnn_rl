@@ -189,12 +189,7 @@ class DQN:
                 else:
                     G = dc(state)
 
-                if self.time_aware:
-                    S_a_encoding, h1, h2, Q_sa = self.model(G, legal_actions, action_type=action_type, gnn_step=gnn_step, remain_episode_len=episode_len-t-1)
-                else:
-                    S_a_encoding, h1, h2, Q_sa = self.model(G, legal_actions, action_type=action_type, gnn_step=gnn_step)
-
-
+                S_a_encoding, h1, h2, Q_sa = self.model(G, legal_actions, action_type=action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-t-1)
 
                 if print_info and (t % episode_len in (0, episode_len//2, episode_len-1)):
                     # print('step:', t)
@@ -273,10 +268,7 @@ class DQN:
 
                 batch_G = dgl.batch(G)
 
-                if self.time_aware:
-                    S_a_encoding, h1, h2, Q_sa = self.model(batch_G, batch_legal_actions, action_type=action_type, gnn_step=gnn_step, remain_episode_len=episode_len-t-1)
-                else:
-                    S_a_encoding, h1, h2, Q_sa = self.model(batch_G, batch_legal_actions, action_type=action_type, gnn_step=gnn_step)
+                S_a_encoding, h1, h2, Q_sa = self.model(batch_G, batch_legal_actions, action_type=action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-t-1)
 
                 if print_info and (t % episode_len in (0, episode_len//2, episode_len-1)):
                     h_support1 = h1.nonzero().shape[0]
@@ -311,7 +303,7 @@ class DQN:
 
         self.experience_replay_buffer.extend(ep)
         self.buffer_episode_offset.extend([self.buffer_episode_offset[-1] + ep[0].episode_len * k for k in range(batch_size)])
-        self.buffer_indices.append(list(range(ep[0].episode_len)) * batch_size)
+        self.buffer_indices.extend([list(range(ep[0].episode_len))] * batch_size)
         self.log.add_item('tot_return', sum_r.item())
         tot_return = sum(R).item()
 
@@ -321,7 +313,8 @@ class DQN:
 
         flat_ep_i = [(x[0], y) for x in zip(range(len(self.buffer_indices)), self.buffer_indices) for y in x[1][:-q_step]]
         # sample #batch_size indices in replay buffer
-        idx_start = random.sample(flat_ep_i, min(batch_size, len(flat_ep_i)))
+        batch_size = min(batch_size, len(flat_ep_i))
+        idx_start = random.sample(flat_ep_i, batch_size)
 
         # # locate samples in each episode
         # batch_idx = [(i // episode_len, i % episode_len) for i in idx]
@@ -371,25 +364,36 @@ class DQN:
         batch_begin_action = torch.cat(begin_action, axis=0)
         batch_end_action = torch.cat(end_action, axis=0)
 
-        # estimate Q-values
-        if self.time_aware:
-            _, _, _, Q_s1a = self.model(batch_begin_state, batch_begin_action, action_type=self.action_type, gnn_step=gnn_step, remain_episode_len=episode_len-step_j-1)
-            _, _, _, Q_s2a = self.model_target(batch_end_state, batch_end_action, action_type=self.action_type, gnn_step=gnn_step, remain_episode_len=episode_len-step_j-1-q_step)
-        else:
-            _, _, _, Q_s1a = self.model(batch_begin_state, batch_begin_action, action_type=self.action_type, gnn_step=gnn_step)
-            _, _, _, Q_s2a = self.model_target(batch_end_state, batch_end_action, action_type=self.action_type, gnn_step=gnn_step)
+        ## old version
+        # action_mask = torch.tensor(range(0, G_start_actions.shape[0] * batch_size, G_start_actions.shape[0])).cuda()
+        # _, _, _, Q_s1a = self.model(batch_begin_state, batch_begin_action, action_type=self.action_type,
+        #                             gnn_step=gnn_step)
+        # _, _, _, Q_s2a = self.model_target(batch_end_state, batch_end_action, action_type=self.action_type,
+        #                                    gnn_step=gnn_step)
+        #
+        # q = self.gamma ** q_step * Q_s2a.view(-1, G_start_actions.shape[0]).max(dim=1).values
+        # q -= Q_s1a[action_mask + torch.tensor(action_indices).cuda()]
 
-        # calculate diff between Q-values at start/end
+
+        # estimate Q-values and calculate diff between Q-values at start/end
         action_mask = torch.tensor(range(0, G_start_actions.shape[0] * batch_size, G_start_actions.shape[0])).cuda()
-        if self.time_aware and step_j + q_step == episode_len - 1:
-            q = 0
-        else:
-            if not ddqn:
-                q = self.gamma ** q_step * Q_s2a.view(-1, G_start_actions.shape[0]).max(dim=1).values
+        begin_action_list = action_mask + torch.tensor(action_indices).cuda()
+        if not ddqn:
+            # only compute limited number for Q_s1a
+            _, _, _, Q_s1a_ = self.model(batch_begin_state, batch_begin_action[begin_action_list], action_type=self.action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-step_j-1)
+            _, _, _, Q_s2a = self.model_target(batch_end_state, batch_end_action, action_type=self.action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-step_j-1-q_step)
+            if self.time_aware and step_j + q_step == episode_len - 1:
+                q = - Q_s1a_
             else:
-                q = self.gamma ** q_step * Q_s2a[action_mask + Q_s1a.view(-1, G_start_actions.shape[0]).argmax(dim=1)]
-
-        q -= Q_s1a[action_mask + torch.tensor(action_indices).cuda()]
+                q = self.gamma ** q_step * Q_s2a.view(-1, G_start_actions.shape[0]).max(dim=1).values - Q_s1a_
+        else:
+            _, _, _, Q_s1a = self.model(batch_begin_state, batch_begin_action, action_type=self.action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-step_j-1)
+            max_action_list = action_mask + Q_s1a.view(-1, G_start_actions.shape[0]).argmax(dim=1)
+            _, _, _, Q_s2a_ = self.model_target(batch_end_state, batch_end_action[max_action_list], action_type=self.action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-step_j-1-q_step)
+            if self.time_aware and step_j + q_step == episode_len - 1:
+                q = - Q_s1a[begin_action_list]
+            else:
+                q = self.gamma ** q_step * Q_s2a_ - Q_s1a[begin_action_list]
 
         Q = q.unsqueeze(0)
 

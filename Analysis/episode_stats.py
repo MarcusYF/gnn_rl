@@ -79,49 +79,34 @@ class test_summary():
 # alg_first_work_version = dc(alg)
 # alg_q_110 = dc(alg)
 
-folder = 'Models/dqn_0112_base_parallel/'
-# folder = 'Models/dqn_0113_base_parallel_test_grad_accum/'
-with open(folder + 'dqn_' + str(1500), 'rb') as model_file:
-    alg = pickle.load(model_file)
-
-x = []
-for i in range(alg.experience_replay_buffer.__len__()):
-    x.append(sum(alg.experience_replay_buffer[i].reward_seq))
-sum(x)
-
-13.7886
-35.3720
-64.9265
-85.8639
-106.3571
-97.5171
-109.9404
-106.3062
 
 
-buf = alg.experience_replay_buffer[-1]
 
-problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
-g1 = problem.g
-g1a = problem.get_legal_actions()
-problem.reset()
-g2 = problem.g
-g2a = problem.get_legal_actions()
-bg = dgl.batch([g1, g2])
-model = model.cpu()
-sa1, _, h1, q1 = model(g1, g1a)
-sa2, _, h2, q2 = model(g2, g2a)
 
-ga = torch.cat([g1a, g2a], axis=0)
 
-torch.norm(torch.cat([sa1, sa2], axis=0) - sa)
-torch.norm(torch.cat([h1, h2], axis=0) - h)
-torch.norm(torch.cat([q1, q2], axis=0) - q)
-sa, _, h, q = model(bg, ga)
-
-a = conv(g1, aa)
-b = conv(g2, bb)
-c = conv(bg, torch.cat([aa, bb], axis=0))
+# buf = alg.experience_replay_buffer[-1]
+#
+# problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
+# g1 = problem.g
+# g1a = problem.get_legal_actions()
+# problem.reset()
+# g2 = problem.g
+# g2a = problem.get_legal_actions()
+# bg = dgl.batch([g1, g2])
+# model = model.cpu()
+# sa1, _, h1, q1 = model(g1, g1a)
+# sa2, _, h2, q2 = model(g2, g2a)
+#
+# ga = torch.cat([g1a, g2a], axis=0)
+#
+# torch.norm(torch.cat([sa1, sa2], axis=0) - sa)
+# torch.norm(torch.cat([h1, h2], axis=0) - h)
+# torch.norm(torch.cat([q1, q2], axis=0) - q)
+# sa, _, h, q = model(bg, ga)
+#
+# a = conv(g1, aa)
+# b = conv(g2, bb)
+# c = conv(bg, torch.cat([aa, bb], axis=0))
 
 # baseline = test_summary(alg=alg, problem=problem, num_instance=100)
 # baseline.run_test(explore_prob=1.0)
@@ -135,21 +120,6 @@ test2 = test_summary(alg=alg, problem=problem, num_instance=100)
 test2.run_test(episode_len=50, explore_prob=0, time_aware=False)
 test2.show_result()
 
-for i in range(100):
-    if not test2.episodes[i].action_seq[-1] == test2.episodes[i].action_seq[-2]:
-        print(i)
-# 1 3
-# 5 3
-# 26 4
-# 32 3
-# 40 3
-# 51 4
-# 61 3
-# 64 4
-# 68 3
-# 70 3
-# 92 3
-# 95 3
 
 problem.calc_S(alg.experience_replay_buffer[1].init_state)
 y = 0
@@ -193,35 +163,6 @@ alg.experience_replay_buffer[0].action_seq
 
 np.cumsum(alg.experience_replay_buffer[0].reward_seq)
 
-x = []
-
-ret = alg.log.get_log("tot_return")
-for i in range(2489):
-    x.append(np.mean(alg.log.get_log("tot_return")[i*10:i*10+100]))
-qv=alg.log.get_log("Q_error")
-
-fig = plt.figure(figsize=[10, 5])
-ax = fig.add_subplot(121)
-ax.plot(x, label='episode reward')
-ax2 = ax.twinx()
-eps = np.concatenate([np.linspace(1.0, 0.1, 1000),np.ones(len(x)-1000)*0.1 ]) #
-ax2.plot(eps, label='\epsilon-greedy exploration prob.', color='r')
-# fig.legend(loc=1)
-ax.set_xlabel('Training Epochs')
-ax.set_ylabel("Accumulated Episode Reward")
-ax2.set_ylabel("Exploration Probability")
-ax.set_title('Training Reward')
-ax = fig.add_subplot(122)
-ax.plot(qv, label='episode reward')
-ax2 = ax.twinx()
-ax2.plot(eps, label='\epsilon-greedy exploration prob.', color='r')
-# fig.legend(loc=1)
-ax.set_xlabel('Training Epochs')
-ax.set_ylabel("Qradratic Q-loss ")
-ax2.set_ylabel("Exploration Probability")
-ax.set_title('Training Loss')
-plt.savefig('./Analysis/' + 'return-base-3' + '.png')
-plt.close()
 
 
 

@@ -48,15 +48,15 @@ parser.add_argument('--time_aware', default=False)
 parser.add_argument('--a', default=1, help="")
 parser.add_argument('--gamma', type=float, default=0.9, help="")
 parser.add_argument('--eps', type=float, default=0.1, help="")
-parser.add_argument('--explore_end_at', type=float, default=0.2, help="")
+parser.add_argument('--explore_end_at', type=float, default=0.5, help="")
 parser.add_argument('--lr', type=float, default=0.0001, help="learning rate")
-parser.add_argument('--n_epoch', default=5000)
-parser.add_argument('--save_ckpt_step', default=500)
+parser.add_argument('--n_epoch', default=10000)
+parser.add_argument('--save_ckpt_step', default=1000)
 parser.add_argument('--target_update_step', default=5)
 parser.add_argument('--replay_buffer_size', default=100, help="")
-parser.add_argument('--batch_size', default=490, help='')
+parser.add_argument('--batch_size', default=1000, help='')
 parser.add_argument('--grad_accum', default=1, help='')
-parser.add_argument('--sample_batch_episode', default=True, help='')
+parser.add_argument('--sample_batch_episode', default=False, help='')
 parser.add_argument('--n_episode', default=10, help='')
 parser.add_argument('--episode_len', default=50, help='')
 parser.add_argument('--gnn_step', default=3, help='')
@@ -156,11 +156,9 @@ def run_dqn(alg):
         print('Epoch: {}. R: {}. Q error: {}. H: {}. T: {}'
               .format(i
                , np.round(log.get_current('tot_return'), 2)
-               # , log.get_current('R_signal')
                , np.round(log.get_current('Q_error'), 3)
                , np.round(log.get_current('entropy'), 3)
                , np.round(T2-T1, 3)))
-
 
 if __name__ == '__main__':
     run_dqn(alg)

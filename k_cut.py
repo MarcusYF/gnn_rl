@@ -448,7 +448,7 @@ class DQNet(nn.Module):
 
         self.h_residual = []
 
-    def forward(self, g, actions=None, action_type='swap', gnn_step=3, remain_episode_len=None):
+    def forward(self, g, actions=None, action_type='swap', gnn_step=3, time_aware=False, remain_episode_len=None):
 
         if isinstance(g, BatchedDGLGraph):
             batch_size = g.batch_size
@@ -456,10 +456,11 @@ class DQNet(nn.Module):
         else:
             num_action = actions.shape[0]
 
+
         h = g.ndata['h']
 
         # if in time-aware mode
-        if remain_episode_len is not None:
+        if time_aware:
             h[:, -1] += remain_episode_len
 
         for i in range(gnn_step):
