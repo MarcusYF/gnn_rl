@@ -34,6 +34,7 @@ class EpisodeHistory:
     def __init__(self, g, max_episode_len, action_type='swap'):
         self.action_type = action_type
         self.init_state = dc(g)
+
         self.n = g.number_of_nodes()
         self.max_episode_len = max_episode_len
         self.episode_len = 0
@@ -44,6 +45,7 @@ class EpisodeHistory:
             self.label_perm = torch.tensor(range(self.n)).unsqueeze(0)
         if self.action_type == 'flip':
             self.label_perm = self.init_state.ndata['label'].nonzero()[:, 1].unsqueeze(0)
+        self.visited_state = set([''.join([str(i.item()) for i in torch.tensor(range(self.n)).unsqueeze(0)[0]])])
         self.node_visit_cnt = [0] * self.n
 
     def perm_label(self, label, action):
@@ -56,11 +58,24 @@ class EpisodeHistory:
             label[action[0]] = action[1]
         return label.unsqueeze(0)
 
+    def check_loop(self, action):
+
+        new_label = self.perm_label(self.label_perm[-1, :], action)
+        new_label_str = ''.join([str(i.item()) for i in new_label[0]])
+        if new_label_str in self.visited_state:
+            return True
+        else:
+            return False
+
     def write(self, action, action_idx, reward):
+
+        new_label = self.perm_label(self.label_perm[-1, :], action)
+        new_label_str = ''.join([str(i.item()) for i in new_label[0]])
+        self.visited_state.add(new_label_str)
         self.action_seq.append(action)
         self.action_indices.append(action_idx)
         self.reward_seq.append(reward)
-        self.label_perm = torch.cat([self.label_perm, self.perm_label(self.label_perm[-1, :], action)], dim=0)
+        self.label_perm = torch.cat([self.label_perm, new_label], dim=0)
         self.node_visit_cnt[action[0]] += 1
         self.node_visit_cnt[action[1]] += 1
         self.episode_len += 1
@@ -173,8 +188,6 @@ class DQN:
         t = 0
 
         ep = EpisodeHistory(state, episode_len, action_type=action_type)
-        # print('init_label:', state.ndata['label'])
-        # print('x:', state.ndata['x'])
 
         terminal_flag = False
 
@@ -220,7 +233,15 @@ class DQN:
             swap_i, swap_j = legal_actions[best_action]
 
             # TODO: Re-design reward signal? What about the terminal state?
+            trial = 0
+            while ep.check_loop(action=(swap_i, swap_j)) and trial < 10:
+                random_action = torch.randint(high=legal_actions.shape[0], size=(1, )).squeeze()
+                swap_i, swap_j = legal_actions[random_action]
+                trial += 1
+
             state, reward = self.problem.step((swap_i, swap_j), action_type=action_type)
+
+            ep.write(action=(swap_i, swap_j), action_idx=best_action, reward=reward.unsqueeze(0))
 
             sum_r += reward
 
@@ -229,7 +250,6 @@ class DQN:
             else:
                 R = torch.cat([R, reward.unsqueeze(0)], dim=0)
 
-            ep.write(action=(swap_i, swap_j), action_idx=best_action, reward=R[-1])
             # terminal_flag = max(ep.node_visit_cnt) > 5
             t += 1
 

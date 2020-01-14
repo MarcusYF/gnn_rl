@@ -176,12 +176,22 @@ buf = alg_q_110.experience_replay_buffer[39]
 buf.action_seq
 buf.reward_seq
 
+alg.run_episode(gnn_step=3)
+
 buf = alg.experience_replay_buffer[0]
 buf.action_seq
 buf.reward_seq
 
+[(tensor(6, device='cuda:0'), tensor(7, device='cuda:0')),
+ (tensor(0, device='cuda:0'), tensor(6, device='cuda:0')),
+ (tensor(4, device='cuda:0'), tensor(5, device='cuda:0')),
+ (tensor(4, device='cuda:0'), tensor(7, device='cuda:0')),
+ (tensor(5, device='cuda:0'), tensor(8, device='cuda:0')),
+ (tensor(1), tensor(8)),
+ (tensor(0), tensor(1)),
+
 problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
-buf = alg.experience_replay_buffer[-1]
+buf = alg.experience_replay_buffer[0]
 buf.init_state.ndata['label']
 problem.g = dc(buf.init_state)
 
@@ -189,19 +199,19 @@ l = buf.init_state.ndata['label'][[8, 4, 3, 2, 6, 7, 1, 5, 0],:].nonzero()[:,1]
 
 problem.reset_label([0, 1, 0, 2, 2, 1, 2, 1, 0])
 problem.calc_S()
-problem.step((0,2))
+problem.step((1,8))
 vis_g(problem, name='toy_models/0109_4', topo='c')
 
 
 
 sa_,_,_,Q_sa_=alg.model(to_cuda(problem.g), problem.get_legal_actions())
-[-0.0430, -0.2413,  0.0153, -0.0343,  0.5179,  0.3169, -0.5515,  0.1526,
-        -0.4617,  0.5946,  0.3297, -0.3749, -0.0220, -0.1082,  0.2090,  0.1211,
-         0.0527,  0.3200, -1.2247, -0.1389,  0.2418,  0.3372,  0.2105, -0.1443,
-         0.4358, -1.2212,  1.2940, -0.0576,  0.0735, -0.4657,  0.5310, -0.2026,
-         0.0486, -0.8602,  0.6603, -0.0188, -0.0522,  0.1204, -0.3271,  0.1766,
-        -0.0987,  0.1082, -0.1460,  0.3840,  0.3362, -0.2727, -0.9411,  1.1252,
-         0.9971, -0.7746]
+[-0.9731,  0.4071, -0.2058,  0.1090,  0.7073, -0.7521,  0.7732, -1.1587,
+         0.1465,  1.4894, -0.4074, -1.0282,  0.4630, -0.3669, -0.1107, -0.0029,
+         0.0052,  0.4920, -0.1909,  0.0461,  0.9827,  0.3718, -0.4183, -0.2039,
+         0.2517, -0.3922,  0.0429,  0.0043, -0.0671, -0.3431,  0.3735, -0.0446,
+        -0.9731,  0.0697,  0.4810,  0.1089, -0.0939,  0.1573, -0.2550,  0.4802,
+        -0.2886, -0.2930,  0.0931,  0.5797, -0.4734, -0.3426, -0.1073,  0.4440,
+        -0.1909, -0.3064]
 problem.step((4,8))
 _,_,_,Q_sa1=alg.model(to_cuda(problem.g), problem.get_legal_actions())
 [ 2.6993e-04,  1.5106e-01,  2.0658e-01,  2.2934e-02,  1.8874e-01,
