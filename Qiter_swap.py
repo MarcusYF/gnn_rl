@@ -176,6 +176,6 @@ if __name__ == '__main__':
             problem.reset()
             Q_table, err = gen_q_table(problem)
             q_table_batch.append((dc(problem), Q_table, err))
-        with open(path + 'qtable_chunk_' + gpu + str(i), 'wb') as data_file:
+        with open(path + 'qtable_chunk_' + gpu + '_' + str(i), 'wb') as data_file:
             pickle.dump(q_table_batch, data_file)
 
