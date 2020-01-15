@@ -20,10 +20,9 @@ def test_model(alg, problem, gnn_step=3, episode_len=50, explore_prob=0.1, time_
     ep = EpisodeHistory(g, max_episode_len=episode_len)
     for i in range(episode_len):
         legal_actions = test_problem.get_legal_actions()
-        if time_aware:
-            S_a_encoding, h1, h2, Q_sa = alg.model(g, legal_actions, gnn_step=gnn_step, remain_episode_len=episode_len-i-1)
-        else:
-            S_a_encoding, h1, h2, Q_sa = alg.model(g, legal_actions, gnn_step=gnn_step)
+
+        S_a_encoding, h1, h2, Q_sa = alg.model(dgl.batch([g]), legal_actions.cuda(), gnn_step=gnn_step, time_aware=time_aware, remain_episode_len=episode_len-i-1)
+
         # epsilon greedy strategy
         if torch.rand(1) > explore_prob:
             action_idx = Q_sa.argmax()

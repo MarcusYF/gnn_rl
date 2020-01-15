@@ -6,14 +6,15 @@ import itertools
 from tqdm import tqdm
 import numpy as np
 
-def state2QtableKey(s):
+def state2QtableKey(s, reduce_rotate=True):
     # ruduce state space
-    # first_ergodic = []
-    # for i in s:
-    #     if i not in first_ergodic:
-    #         first_ergodic.append(i)
-    # m = dict(zip(first_ergodic, range(len(first_ergodic))))
-    # s = [m[i] for i in s]
+    if reduce_rotate:
+        first_ergodic = []
+        for i in s:
+            if i not in first_ergodic:
+                first_ergodic.append(i)
+        m = dict(zip(first_ergodic, range(len(first_ergodic))))
+        s = [m[i] for i in s]
     return ','.join([str(x) for x in s])
 
 def QtableKey2state(k):
@@ -54,31 +55,32 @@ def vis_g(problem, name='test', topo='knn'):
 if __name__ == '__main__':
     n, k, m = 9, 3, 3
     problem = KCut_DGL(k=k, m=m, adjacent_reserve=5, hidden_dim=8)
+    #
+    # x = th.tensor([[0.1,0.1],[0.1,0.2],[0.2,0.1],[0.2,0.2],[0.12,0.23],[0.9,0.9],[0.8,0.8],[0.9,0.8],[0.8,0.9]])
+    # problem = KCut_DGL(k=k, m=m, adjacent_reserve=5, hidden_dim=8, random_sample_node=False, x=x)
+    # # problem = KCut_DGL(k=k, m=m, adjacent_reserve=5, hidden_dim=8, random_init_label=False, random_sample_node=False
+    # #                    , label=[0,0,0,0,0,1,1,1,1,1,2,2,2,2,2]
+    # #                    , x=th.tensor([[0, 0], [0, 1], [1, 0], [1, 1], [0.7, 0.8], [1.5, 1.5], [1.5, 3], [3, 3], [3, 1.5], [1.8, 1.7], [1.8, 0.3], [1.8, 0.8], [2.3, 0.8], [2.3, 0.3], [2.1, 0.5]]))
+    #
+    # problem.calc_S()
+    # problem.g.ndata['label']
+    # vis_g(problem, name='toy_models/toy93', topo='c')
+    # vis_g(problem, name='toy_models/toy94')
+    # problem.reset_label([0,1,1,0,1,2,2,0,2])
+    # problem.calc_S()
+    # problem.step((1,2), action_type='flip')
+    # problem.calc_S()
+    # problem.g.ndata['label']
+    # vis_g(problem, name='toy_models/flip0', topo='cluster')
+    # # g = generate_G(k=k, m=4, adjacent_reserve=1, hidden_dim=8, random_init_label=True, a=1, sample=False)['g']
 
-    x = th.tensor([[0.1,0.1],[0.1,0.2],[0.2,0.1],[0.2,0.2],[0.12,0.23],[0.9,0.9],[0.8,0.8],[0.9,0.8],[0.8,0.9]])
-    problem = KCut_DGL(k=k, m=m, adjacent_reserve=5, hidden_dim=8, random_sample_node=False, x=x)
-    # problem = KCut_DGL(k=k, m=m, adjacent_reserve=5, hidden_dim=8, random_init_label=False, random_sample_node=False
-    #                    , label=[0,0,0,0,0,1,1,1,1,1,2,2,2,2,2]
-    #                    , x=th.tensor([[0, 0], [0, 1], [1, 0], [1, 1], [0.7, 0.8], [1.5, 1.5], [1.5, 3], [3, 3], [3, 1.5], [1.8, 1.7], [1.8, 0.3], [1.8, 0.8], [2.3, 0.8], [2.3, 0.3], [2.1, 0.5]]))
-
-    problem.calc_S()
-    problem.g.ndata['label']
-    vis_g(problem, name='toy_models/toy93', topo='c')
-    vis_g(problem, name='toy_models/toy94')
-    problem.reset_label([0,1,1,0,1,2,2,0,2])
-    problem.calc_S()
-    problem.step((1,2), action_type='flip')
-    problem.calc_S()
-    problem.g.ndata['label']
-    vis_g(problem, name='toy_models/flip0', topo='cluster')
-    # g = generate_G(k=k, m=4, adjacent_reserve=1, hidden_dim=8, random_init_label=True, a=1, sample=False)['g']
 
 
-
-    action_type = 'flip'
+    action_type = 'swap'
 
     if action_type == 'swap':
-        all_state = set([state2QtableKey(x) for x in list(itertools.permutations([0,0,0,1,1,1,2,2,2], n))])
+        all_state = set([state2QtableKey(x, reduce_rotate=False) for x in list(itertools.permutations([0,0,0,1,1,1,2,2,2], n))])
+
     if action_type == 'flip':
         all_state = [state2QtableKey(x) for x in list(itertools.product([0,1,2],[0,1,2],[0,1,2],[0,1,2],[0,1,2],[0,1,2],[0,1,2],[0,1,2],[0,1,2]))]
 
@@ -152,7 +154,8 @@ if __name__ == '__main__':
 
 
     # test
-    episode_name = 'toy_models/test1_flip_'
+    Q_table = Q_table_280
+    episode_name = 'test2_swap_'
     Obj = []
     Reward = []
     init_solution = np.random.permutation([1,1,1,2,2,2,0,0,0])
@@ -185,4 +188,5 @@ if __name__ == '__main__':
         vis_g(problem, name=episode_name+str(ite), topo='cluster')
         ite += 1
     Obj
+
 

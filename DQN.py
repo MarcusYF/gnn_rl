@@ -202,7 +202,7 @@ class DQN:
                 else:
                     G = dc(state)
 
-                S_a_encoding, h1, h2, Q_sa = self.model(G, legal_actions, action_type=action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-t-1)
+                S_a_encoding, h1, h2, Q_sa = self.model(dgl.batch([G]), legal_actions, action_type=action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-t-1)
 
                 if print_info and (t % episode_len in (0, episode_len//2, episode_len-1)):
                     # print('step:', t)

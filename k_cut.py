@@ -443,6 +443,10 @@ class DQNet(nn.Module):
         # baseline
         self.t5 = nn.Linear(2 * self.hidden_dim, 1)
         self.t6 = nn.Linear(self.hidden_dim, self.hidden_dim)
+        # for centroid graph representation
+        self.t5_ = nn.Linear((self.k + 2) * self.hidden_dim, 1)
+        self.t6_ = nn.Linear(self.hidden_dim * self.k, self.hidden_dim * self.k)
+
         self.t7 = nn.Linear(2 * self.hidden_dim, self.hidden_dim)
         self.t8 = nn.Linear(self.hidden_dim + self.k, self.hidden_dim)
 
@@ -475,8 +479,15 @@ class DQNet(nn.Module):
 
         h_new = h
 
+        # compute group centroid for batch graph g
+        batch_centroid = []
+        for i in range(self.k):
+            blocks_i = g.ndata['h'][(g.ndata['label'][:, i] > .5).nonzero().squeeze()]
+            batch_centroid.append(torch.mean(blocks_i.view(batch_size, self.m, self.hidden_dim), axis=1))
+
         if isinstance(g, BatchedDGLGraph):
-            graph_embedding = self.t6(dgl.mean_nodes(g, 'h')).repeat(1, num_action).view(num_action * batch_size, -1)
+            graph_embedding = self.t6_(torch.cat(batch_centroid, axis=1)).repeat(1, num_action).view(num_action * batch_size, -1) # batch_size * (h * k)
+            # graph_embedding = self.t6(dgl.mean_nodes(g, 'h')).repeat(1, num_action).view(num_action * batch_size, -1)
         else:
             graph_embedding = self.t6(torch.mean(g.ndata['h'], dim=0)).repeat(num_action, 1)
 
@@ -493,12 +504,13 @@ class DQNet(nn.Module):
         if action_type == 'flip':
             q_actions = self.t8(torch.cat([g.ndata['h'][actions_[:, 0], :], torch.nn.functional.one_hot(actions_[:, 1], g.ndata['label'].shape[1]).float()], axis=1))
         if action_type == 'swap':
-            q_actions = self.t7(torch.cat([g.ndata['h'][actions_[:, 0], :], g.ndata['h'][actions_[:, 1], :]], axis=1))
+            q_actions = torch.cat([g.ndata['h'][actions_[:, 0], :], g.ndata['h'][actions_[:, 1], :]], axis=1)
+            # q_actions = self.t7(torch.cat([g.ndata['h'][actions_[:, 0], :], g.ndata['h'][actions_[:, 1], :]], axis=1))
 
         S_a_encoding = torch.cat([graph_embedding, q_actions], axis=1)
 
-        Q_sa = self.t5(F.relu(S_a_encoding)).squeeze()
-
+        # Q_sa = self.t5(F.relu(S_a_encoding)).squeeze()
+        Q_sa = self.t5_(F.relu(S_a_encoding)).squeeze()
         # Q_sa = (Q_sa.view(n, n) + Q_sa.view(n, n).t()).view(n**2)
 
         return S_a_encoding, h_new, g.ndata['h'], Q_sa

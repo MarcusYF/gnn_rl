@@ -16,8 +16,8 @@ from toy_models.Qiter import vis_g
 folder = 'Models/dqn_0114_base/'
 folder = 'Models/dqn_0113_cutloop/'
 folder = 'Models/dqn_0113_test_eps1/'
-# folder = 'Models/dqn_test_not_sample_batch_episode/'
-with open(folder + 'dqn_' + str(4500), 'rb') as model_file:
+folder = 'Models/dqn_test_centroid_h16/'
+with open(folder + 'dqn_' + str(3500), 'rb') as model_file:
     alg = pickle.load(model_file)
 
 x = []
