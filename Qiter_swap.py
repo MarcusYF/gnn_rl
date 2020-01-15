@@ -54,7 +54,7 @@ def vis_g(problem, name='test', topo='knn'):
     plt.savefig('./' + name + '.png')
     plt.close()
 
-def gen_q_table(problem_instance, max_ite=200, err_bound=1e-4):
+def gen_q_table(problem_instance, max_ite=200, err_bound=1e-3):
 
     problem = dc(problem_instance)
 
@@ -121,7 +121,8 @@ def gen_q_table(problem_instance, max_ite=200, err_bound=1e-4):
             Q_table[k][a] = (State_Action_Reward[k][a].item(), Q_table[k][a].item())
     State_Action_Reward, Q_table
 
-    print('Q-value iteration exits with error ', err.item(), '\n')
+    print('Q-value iteration exits with iterations: {}, error: {}'.format(ite, err.item()))
+
     return Q_table, err.item()
 
     # # test
