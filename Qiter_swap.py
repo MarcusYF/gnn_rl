@@ -68,7 +68,7 @@ def vis_g(problem, name='test', topo='knn'):
     plt.savefig('./' + name + '.png')
     plt.close()
 
-def gen_q_table(problem_instance, all_state, action_len=27, gamma=0.90, lr=1.0, max_ite=200, err_bound=1e-3):
+def gen_q_table(problem_instance, all_state, action_len=27, gamma=0.90, lr=1.0, max_ite=200, err_bound=1e-4):
 
     problem = dc(problem_instance)
 
