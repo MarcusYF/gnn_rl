@@ -8,6 +8,8 @@ from tqdm import tqdm
 import numpy as np
 import argparse
 
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+
 def state2QtableKey(s, reduce_rotate=True):
     # ruduce state space
     if reduce_rotate:
@@ -18,6 +20,18 @@ def state2QtableKey(s, reduce_rotate=True):
         m = dict(zip(first_ergodic, range(len(first_ergodic))))
         s = [m[i] for i in s]
     return ','.join([str(x) for x in s])
+
+def gen_comb012(n0, n1, n2, prefix=''):
+    l0, l1, l2 = [], [], []
+    if n0 + n1 + n2 == 0:
+        return [prefix]
+    if n0 > 0:
+        l0 = [prefix + s for s in gen_comb012(n0 - 1, n1, n2, prefix='0,')]
+    if n1 > 0:
+        l1 = [prefix + s for s in gen_comb012(n0, n1 - 1, n2, prefix='1,')]
+    if n2 > 0:
+        l2 = [prefix + s for s in gen_comb012(n0, n1, n2 - 1, prefix='2,')]
+    return l0 + l1 + l2
 
 def QtableKey2state(k):
     return [int(x) for x in k.split(',')]
@@ -54,21 +68,27 @@ def vis_g(problem, name='test', topo='knn'):
     plt.savefig('./' + name + '.png')
     plt.close()
 
-def gen_q_table(problem_instance, max_ite=200, err_bound=1e-3):
+def gen_q_table(problem_instance, all_state, action_len=27, gamma=0.90, lr=1.0, max_ite=200, err_bound=1e-3):
 
     problem = dc(problem_instance)
 
-    n, k, m = problem.N, problem.k, problem.m
-    labels = [0,0,0,1,1,1,2,2,2]
-    all_state = set([state2QtableKey(x, reduce_rotate=True) for x in list(itertools.permutations(labels, n))])
+    # cpu is faster
+    # problem.g.ndata['x'] = problem.g.ndata['x'].cuda()
+    # problem.g.ndata['label'] = problem.g.ndata['label'].cuda()
+    # problem.g.ndata['h'] = problem.g.ndata['h'].cuda()
+    # problem.g.edata['d'] = problem.g.edata['d'].cuda()
+    # problem.g.edata['w'] = problem.g.edata['w'].cuda()
+    # problem.g.edata['e_type'] = problem.g.edata['e_type'].cuda()
 
     Q_table = {}
+    t=0
     for state in all_state:
+        t+=1
+        print(t)
         if state in Q_table.keys():
             continue
         Q_table[state] = {}
         l = QtableKey2state(state)
-        R = []
 
         problem.reset_label(l, calc_S=False, rewire_edges=False)
         actions = problem.get_legal_actions()
@@ -80,19 +100,15 @@ def gen_q_table(problem_instance, max_ite=200, err_bound=1e-3):
 
 
     # Start Q-value iteration
-    problem_bak = dc(problem) # detached backup for problem instance
-    Q_table_bak = dc(Q_table) # detached backup for Q-table
+    # problem_bak = dc(problem) # detached backup for problem instance
+    # Q_table_bak = dc(Q_table) # detached backup for Q-table
 
 
-    Q_table_ = dc(Q_table_bak) # target Q-table
-    Q_table = dc(Q_table_bak) # Q-table
-    State_Action_Reward = dc(Q_table_bak)
-    gamma = 0.90
-
-
+    Q_table_ = dc(Q_table) # target Q-table
+    Q_table = dc(Q_table) # Q-table
+    State_Action_Reward = dc(Q_table)
 
     Err = []
-    action_len = 27
     for ite in range(max_ite):
         for state in Q_table.keys():
             for action in Q_table[state].keys():
@@ -100,7 +116,9 @@ def gen_q_table(problem_instance, max_ite=200, err_bound=1e-3):
                 state_ = QtableKey2state(state)
                 state_[i], state_[j] = state_[j], state_[i]  # swap to new state
                 new_state = state2QtableKey(state_)
-                Q_table[state][action] = State_Action_Reward[state][action] + gamma * max(Q_table_[new_state].values())
+
+                q_target = State_Action_Reward[state][action] + gamma * max(Q_table_[new_state].values())
+                Q_table[state][action] += lr * (q_target - Q_table[state][action])
             # update target Q-table
         err = 0
         for state in Q_table.keys():
@@ -109,7 +127,8 @@ def gen_q_table(problem_instance, max_ite=200, err_bound=1e-3):
             diff = 0
             for i in range(action_len):
                 diff += (new_v[i] - old_v[i]) ** 2
-            err += np.sqrt(diff / action_len)
+            err += np.sqrt(diff.cpu() / action_len)
+        print(ite, err.item())
         Err.append(err)
 
         Q_table_ = dc(Q_table)
@@ -155,28 +174,39 @@ def gen_q_table(problem_instance, max_ite=200, err_bound=1e-3):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="Generate groud truth Q-table")
-    parser.add_argument('--save_folder', default='qiter33')
+    parser.add_argument('--save_folder', default='qiter33_0116')
     parser.add_argument('--gpu', default='0', help="")
+    # parser.add_argument('--k', default=3, help="")
+    parser.add_argument('--m', default=3, help="")
+    parser.add_argument('--lr', type=float, default=0.7, help="learning rate")
     parser.add_argument('--thread', default='0', help="")
     parser.add_argument('--batch_size', default=100, help="")
+    parser.add_argument('--batch_num', default=100, help="")
 
     args = vars(parser.parse_args())
 
     save_folder = args['save_folder']
     gpu = args['gpu']
+    # k = int(args['k'])
+    m = int(args['m'])
+    lr = args['lr']
     thread = args['thread']
     batch_size = int(args['batch_size'])
+    batch_num = int(args['batch_num'])
 
     path = 'Data/' + save_folder + '/'
     if not os.path.exists(path):
         os.makedirs(path)
 
-    problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=8)
-    for i in tqdm(range(batch_size)):
+    k = 3
+    problem = KCut_DGL(k=k, m=m, adjacent_reserve=5, hidden_dim=8)
+    all_state = set([state2QtableKey([int(i) for i in s[:-1].split(',')], reduce_rotate=True) for s in gen_comb012(m, m, m)])
+
+    for i in tqdm(range(batch_num)):
         q_table_batch = []
-        for j in range(100):
+        for j in range(batch_size):
             problem.reset()
-            Q_table, err = gen_q_table(problem)
+            Q_table, err = gen_q_table(problem, all_state, action_len=k*m*m, lr=lr)
             q_table_batch.append((dc(problem), Q_table, err))
         with open(path + 'qtable_chunk_' + thread + '_' + str(i), 'wb') as data_file:
             pickle.dump(q_table_batch, data_file)

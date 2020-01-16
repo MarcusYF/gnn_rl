@@ -111,4 +111,4 @@ plt.title('Agent Performance and Benchmarks', fontsize=20)
 plt.savefig('Analysis/' + 'trajectory_vis_3' + '.png')
 plt.close()
 
-
+scp -r fy4bc@128.143.69.125:/home/fy4bc/mnt/code/research/RL4CombOptm/MinimumVertexCover_DRL/Data/qiter33 /u/fy4bc/code/research/RL4CombOptm/gnn_rl/Data

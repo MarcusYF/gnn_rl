@@ -10,7 +10,7 @@ import pickle
 from tqdm import tqdm
 from toy_models.Qiter import vis_g
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 action_type = 'swap'
 k = 3
 m = 3
