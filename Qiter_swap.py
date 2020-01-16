@@ -81,10 +81,7 @@ def gen_q_table(problem_instance, all_state, action_len=27, gamma=0.90, lr=1.0, 
     # problem.g.edata['e_type'] = problem.g.edata['e_type'].cuda()
 
     Q_table = {}
-    t=0
     for state in all_state:
-        t+=1
-        print(t)
         if state in Q_table.keys():
             continue
         Q_table[state] = {}
@@ -128,7 +125,6 @@ def gen_q_table(problem_instance, all_state, action_len=27, gamma=0.90, lr=1.0, 
             for i in range(action_len):
                 diff += (new_v[i] - old_v[i]) ** 2
             err += np.sqrt(diff.cpu() / action_len)
-        print(ite, err.item())
         Err.append(err)
 
         Q_table_ = dc(Q_table)
