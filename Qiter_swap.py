@@ -157,12 +157,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Generate groud truth Q-table")
     parser.add_argument('--save_folder', default='qiter33')
     parser.add_argument('--gpu', default='0', help="")
+    parser.add_argument('--thread', default='0', help="")
     parser.add_argument('--batch_size', default=100, help="")
 
     args = vars(parser.parse_args())
 
     save_folder = args['save_folder']
     gpu = args['gpu']
+    thread = args['thread']
     batch_size = int(args['batch_size'])
 
     path = 'Data/' + save_folder + '/'
@@ -176,6 +178,6 @@ if __name__ == '__main__':
             problem.reset()
             Q_table, err = gen_q_table(problem)
             q_table_batch.append((dc(problem), Q_table, err))
-        with open(path + 'qtable_chunk_' + gpu + '_' + str(i), 'wb') as data_file:
+        with open(path + 'qtable_chunk_' + thread + '_' + str(i), 'wb') as data_file:
             pickle.dump(q_table_batch, data_file)
 

@@ -14,10 +14,11 @@ from toy_models.Qiter import vis_g
 
 # folder = 'Models/dqn_0113_test_qstep/'
 folder = 'Models/dqn_0114_base/'
-folder = 'Models/dqn_0113_cutloop/'
-folder = 'Models/dqn_0113_test_eps1/'
-folder = 'Models/dqn_test_centroid_h16/'
-with open(folder + 'dqn_' + str(3500), 'rb') as model_file:
+# folder = 'Models/dqn_test_not_sample_batch_episode/'
+# folder = 'Models/dqn_0113_cutloop/'
+# folder = 'Models/dqn_0113_test_eps0/'
+# folder = 'Models/dqn_test_centroid_h16/'
+with open(folder + 'dqn_' + str(5000), 'rb') as model_file:
     alg = pickle.load(model_file)
 
 x = []
@@ -37,20 +38,21 @@ sum(x)
 106.3062
 
 # plot Q-loss/Reward curve
-fig_name = 'return-base-5'
+fig_name = 'return-base-7'
 
 ret = alg.log.get_log("tot_return")
 qv = alg.log.get_log("Q_error")
 x = []
 for i in range(len(qv)):
-    if i*10+100<len(ret):
+    if i*10+100<=len(ret):
         x.append(np.mean(ret[i*10:i*10+100]))
 
-fig = plt.figure(figsize=[10, 5])
+fig = plt.figure(figsize=[15, 5])
 ax = fig.add_subplot(121)
-ax.plot(ret, label='episode reward')
+ax.plot(x, label='episode reward')
 ax2 = ax.twinx()
-eps = np.concatenate([np.linspace(1.0, 0.1, 3000), np.ones(len(qv)-3000)*0.1 ]) #
+eps = np.concatenate([np.linspace(1.0, 0.3, 1000), np.ones(len(qv)-1000)*0.3]) #
+eps = np.linspace(0.5, 0.1, 5000)
 ax2.plot(eps, label='\epsilon-greedy exploration prob.', color='r')
 # fig.legend(loc=1)
 ax.set_xlabel('Training Epochs')
@@ -58,7 +60,7 @@ ax.set_ylabel("Accumulated Episode Reward")
 ax2.set_ylabel("Exploration Probability")
 ax.set_title('Training Reward')
 ax = fig.add_subplot(122)
-ax.plot(qv, label='episode reward')
+ax.plot(range(0,4999), qv[0:], label='episode reward')
 ax2 = ax.twinx()
 ax2.plot(eps, label='\epsilon-greedy exploration prob.', color='r')
 # fig.legend(loc=1)
@@ -68,4 +70,45 @@ ax2.set_ylabel("Exploration Probability")
 ax.set_title('Training Loss')
 plt.savefig('./Analysis/' + fig_name + '.png')
 plt.close()
+
+## plot test performance curve
+buf_perf = 0 # buffer performance
+for i in range(test1.S.__len__()):
+    s = problem.calc_S(alg.experience_replay_buffer[i].init_state)
+    traj = 1 - np.cumsum(alg.experience_replay_buffer[i].reward_seq) / s
+    buf_perf += torch.cat([torch.tensor([1.]), traj], axis=0)
+tst_perf = 0 # test performance
+for i in range(test1.S.__len__()):
+    s = test1.S[i]
+    traj = 1 - np.cumsum(test1.episodes[i].reward_seq) / s
+    a = [1]
+    a.extend(list(traj))
+    tst_perf += np.array(a)
+grd_perf = 0 # greedy algorithm performance/from toy_models/Canonical_solvers
+for i in range(100):
+    s = res[0, i]
+    traj = 1 - np.cumsum(greedy_move_history[i]) / s
+    a = [1]
+    a.extend(list(traj))
+    a = a + [a[-1]] * (51-len(a))
+    grd_perf += np.array(a)
+
+performance_horizon = [1-(sum(res[0,:])-sum(res[1,:]))/sum(res[0,:])] * 51
+
+
+plt.figure(figsize=[10, 10])
+plt.subplot(111)
+plt.plot(buf_perf/100, color='y')
+plt.plot(tst_perf/100, color='b')
+plt.plot(grd_perf/100, color='r')
+plt.plot(performance_horizon, color='k')
+plt.legend(['replay buffer(eps=0.1)', 'test set(eps=0)', 'greedy search', 'optimal solution'], loc="upper right", fontsize=20)
+plt.xlabel('Action Steps', fontsize=20)
+plt.ylabel('Scaled Objective-S', fontsize=20)
+plt.xticks(fontsize=15)
+plt.yticks(fontsize=15)
+plt.title('Agent Performance and Benchmarks', fontsize=20)
+plt.savefig('Analysis/' + 'trajectory_vis_3' + '.png')
+plt.close()
+
 

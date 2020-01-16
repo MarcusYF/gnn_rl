@@ -12,28 +12,7 @@ from tqdm import tqdm
 from toy_models.Qiter import vis_g
 
 
-def test_model(alg, problem, gnn_step=3, episode_len=50, explore_prob=0.1, time_aware=False):
-    problem.reset()
-    test_problem = problem
-    S = test_problem.calc_S()
-    g = to_cuda(test_problem.g)
-    ep = EpisodeHistory(g, max_episode_len=episode_len)
-    for i in range(episode_len):
-        legal_actions = test_problem.get_legal_actions()
 
-        S_a_encoding, h1, h2, Q_sa = alg.model(dgl.batch([g]), legal_actions.cuda(), gnn_step=gnn_step, time_aware=time_aware, remain_episode_len=episode_len-i-1)
-
-        # epsilon greedy strategy
-        if torch.rand(1) > explore_prob:
-            action_idx = Q_sa.argmax()
-        else:
-            action_idx = torch.randint(high=legal_actions.shape[0], size=(1,)).squeeze()
-        swap_i, swap_j = legal_actions[action_idx]
-        state, reward = test_problem.step((swap_i, swap_j))
-        ep.write((swap_i, swap_j), action_idx, reward)
-        g = to_cuda(state)
-
-    return S, ep
 
 
 class test_summary():
@@ -48,11 +27,43 @@ class test_summary():
         self.max_gain_budget = []
         self.max_gain_ratio = []
 
+    # need to adapt from Canonical_solvers.py
+    def cmpt_optimal(self):
+        return
+
+    # need to adapt from Canonical_solvers.py
+    def test_greedy(self):
+        return
+
+    def test_model(self, gnn_step=3, episode_len=50, explore_prob=0.1, time_aware=False):
+        self.problem.reset()
+        test_problem = self.problem
+        S = test_problem.calc_S()
+        g = to_cuda(test_problem.g)
+        ep = EpisodeHistory(g, max_episode_len=episode_len)
+        for i in range(episode_len):
+            legal_actions = test_problem.get_legal_actions()
+
+            S_a_encoding, h1, h2, Q_sa = self.alg.model(dgl.batch([g]), legal_actions.cuda(), gnn_step=gnn_step,
+                                                   time_aware=time_aware, remain_episode_len=episode_len - i - 1)
+
+            # epsilon greedy strategy
+            if torch.rand(1) > explore_prob:
+                action_idx = Q_sa.argmax()
+            else:
+                action_idx = torch.randint(high=legal_actions.shape[0], size=(1,)).squeeze()
+            swap_i, swap_j = legal_actions[action_idx]
+            state, reward = test_problem.step((swap_i, swap_j))
+            ep.write((swap_i, swap_j), action_idx, reward)
+            g = to_cuda(state)
+
+        return S, ep
+
     def run_test(self, episode_len=50, explore_prob=.0, time_aware=False, criteria='end'):
 
         for _ in tqdm(range(self.num_instance)):
             self.problem.reset()
-            s, ep = test_model(self.alg, self.problem, episode_len=episode_len, explore_prob=explore_prob, time_aware=time_aware)
+            s, ep = self.test_model(episode_len=episode_len, explore_prob=explore_prob, time_aware=time_aware)
             self.S.append(s.item())
             self.episodes.append((ep))
             if criteria == 'max':
@@ -111,7 +122,7 @@ class test_summary():
 # baseline.show_result()
 folder = 'Models/dqn_0114_base/'
 # folder = 'Models/dqn_test_not_sample_batch_episode/'
-with open(folder + 'dqn_' + str(5500), 'rb') as model_file:
+with open(folder + 'dqn_' + str(5000), 'rb') as model_file:
     alg = pickle.load(model_file)
 problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
 test1 = test_summary(alg=alg, problem=problem, num_instance=100)
