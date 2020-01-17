@@ -5,6 +5,7 @@ import torch as th
 import itertools
 from tqdm import tqdm
 import numpy as np
+import pickle
 
 def state2QtableKey(s, reduce_rotate=True):
     # ruduce state space
@@ -152,6 +153,10 @@ if __name__ == '__main__':
         print(err)
         Q_table_ = dc(Q_table)
 
+    folder = '/u/fy4bc/code/research/RL4CombOptm/gnn_rl/Data/qiter33/'
+    # folder = 'Models/dqn_test_not_sample_batch_episode/'
+    with open(folder + 'qtable_chunk_0_0', 'rb') as data_file:
+        data = pickle.load(data_file)
 
     # test
     Q_table = Q_table_280

@@ -32,7 +32,7 @@ def latestModelVersion(file):
 # python run.py --gpu=2 --save_folder=dqn_0110_test_gamma95 --gamma=0.95 --n_epoch=5000 --save_ckpt_step=500
 # python run.py --gpu=1 --save_folder=dqn_0113_test_eps1 --explore_end_at=0.6 --eps=0.1
 # python run.py --gpu=0 --save_folder=dqn_0113_test_eps0 --eps=0.3
-# python run.py --gpu=3 --save_folder=dqn_0113_cutloop --explore_end_at=0.1
+# python run.py --gpu=0 --save_folder=dqn_0116_base
 # args
 parser = argparse.ArgumentParser(description="GNN with RL")
 parser.add_argument('--save_folder', default='test')

@@ -303,7 +303,9 @@ class NodeApplyModule(nn.Module):
         n1_h = node.data['n1_h']
         n1_w = node.data['n1_w']  # weight
 
-        h = self.activation(self.l0(x) + self.l1(l)
+        h = self.activation(0
+                            # + self.l0(x)
+                            + self.l1(l)
                             + self.l2(n1_h)
                             # + self.l3(n2_v)
                             + self.t3(torch.sum(self.activation(self.t4(n1_w)), dim=1))

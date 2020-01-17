@@ -1,18 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="hcdm1" autoUploadExternalChanges="true" showAutoUploadSettingsWarning="false">
+  <component name="PublishConfigData" autoUpload="Always" serverName="hcdm3" autoUploadExternalChanges="true" showAutoUploadSettingsWarning="false">
     <serverData>
       <paths name="Copy of project-level server 'hcdm1'">
         <serverdata>
           <mappings>
             <mapping deploy="/mnt/code/research/RL4CombOptm/MinimumVertexCover_DRL" local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="fy4bc@128.143.67.123:22">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/tmp/pycharm_project_342" local="$PROJECT_DIR$" />
           </mappings>
         </serverdata>
       </paths>

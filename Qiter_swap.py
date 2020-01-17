@@ -106,6 +106,7 @@ def gen_q_table(problem_instance, all_state, action_len=27, gamma=0.90, lr=1.0, 
     State_Action_Reward = dc(Q_table)
 
     Err = []
+    # TODO: improve time efficiency
     for ite in range(max_ite):
         for state in Q_table.keys():
             for action in Q_table[state].keys():
@@ -126,7 +127,7 @@ def gen_q_table(problem_instance, all_state, action_len=27, gamma=0.90, lr=1.0, 
                 diff += (new_v[i] - old_v[i]) ** 2
             err += np.sqrt(diff.cpu() / action_len)
         Err.append(err)
-
+        print(ite, err.item())
         Q_table_ = dc(Q_table)
         if err < err_bound:
             break
@@ -206,4 +207,3 @@ if __name__ == '__main__':
             q_table_batch.append((dc(problem), Q_table, err))
         with open(path + 'qtable_chunk_' + thread + '_' + str(i), 'wb') as data_file:
             pickle.dump(q_table_batch, data_file)
-
