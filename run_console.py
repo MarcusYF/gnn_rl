@@ -1,14 +1,10 @@
-from DQN import DQN, to_cuda, EpisodeHistory
+from DQN import DQN
 from k_cut import *
-import matplotlib.pyplot as plt
-from smooth_signal import smooth
 import numpy as np
 import time
-import torch
 import os
 import pickle
 from tqdm import tqdm
-from toy_models.Qiter import vis_g
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 action_type = 'swap'
@@ -43,8 +39,8 @@ alg = DQN(problem, action_type=action_type
           , time_aware=time_aware
           , cuda_flag=True)
 
-# path = 'Models/dqn_flip_test/'
-path = 'Models/dqn_0114_base/'
+absroot = os.path.dirname(os.getcwd())
+path = absroot + '/Models/dqn_base/'
 if not os.path.exists(path):
     os.makedirs(path)
 with open(path + 'dqn_0', 'wb') as model_file:

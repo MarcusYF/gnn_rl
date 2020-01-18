@@ -127,7 +127,6 @@ def gen_q_table(problem_instance, all_state, action_len=27, gamma=0.90, lr=1.0, 
                 diff += (new_v[i] - old_v[i]) ** 2
             err += np.sqrt(diff.cpu() / action_len)
         Err.append(err)
-        print(ite, err.item())
         Q_table_ = dc(Q_table)
         if err < err_bound:
             break
@@ -191,7 +190,8 @@ if __name__ == '__main__':
     batch_size = int(args['batch_size'])
     batch_num = int(args['batch_num'])
 
-    path = 'Data/' + save_folder + '/'
+    absroot = os.path.dirname(os.getcwd())
+    path = absroot + '/Data/' + save_folder + '/'
     if not os.path.exists(path):
         os.makedirs(path)
 

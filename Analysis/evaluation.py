@@ -1,7 +1,6 @@
 from DQN import DQN, to_cuda, EpisodeHistory
 from k_cut import *
 import matplotlib.pyplot as plt
-from smooth_signal import smooth
 import numpy as np
 import time
 import pickle
@@ -13,12 +12,11 @@ from toy_models.Qiter import vis_g
 # import Analysis.episode_stats.test_summary,test_model
 
 # folder = 'Models/dqn_0113_test_qstep/'
-folder = 'Models/dqn_0114_base/'
 # folder = 'Models/dqn_test_not_sample_batch_episode/'
-folder = 'Models/dqn_0113_cutloop/'
+folder = 'Models/dqn_0116_nox/'
 # folder = 'Models/dqn_0113_test_eps0/'
 # folder = 'Models/dqn_test_centroid_h16/'
-with open(folder + 'dqn_' + str(10000), 'rb') as model_file:
+with open(folder + 'dqn_' + str(4000), 'rb') as model_file:
     alg = pickle.load(model_file)
 
 x = []
@@ -38,7 +36,7 @@ sum(x)
 106.3062
 
 # plot Q-loss/Reward curve
-fig_name = 'return-base-8'
+fig_name = 'return-base-9'
 
 ret = alg.log.get_log("tot_return")
 qv = alg.log.get_log("Q_error")
@@ -60,7 +58,7 @@ ax.set_ylabel("Accumulated Episode Reward")
 ax2.set_ylabel("Exploration Probability")
 ax.set_title('Training Reward')
 ax = fig.add_subplot(122)
-ax.plot(range(9999), qv[0:], label='episode reward')
+ax.plot(qv[0:], label='episode reward')
 ax2 = ax.twinx()
 ax2.plot(eps, label='\epsilon-greedy exploration prob.', color='r')
 # fig.legend(loc=1)
