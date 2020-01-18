@@ -240,6 +240,7 @@ class KCut_DGL():
             else:
                 reward = torch.sqrt(torch.sum(torch.pow(old, 2), axis=1)).sum() \
                         - torch.sqrt(torch.sum(torch.pow(new, 2), axis=1)).sum()
+                - torch.sqrt(torch.sum(torch.pow(new, 2), axis=1)).sum()
 
             # flip node
             state.nodes[i].data['label'] = torch.nn.functional.one_hot(torch.tensor([target_label]), self.k).float()
