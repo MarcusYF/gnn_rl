@@ -1,7 +1,6 @@
 from DQN import DQN, to_cuda, EpisodeHistory
 from k_cut import *
 import matplotlib.pyplot as plt
-from smooth_signal import smooth
 import numpy as np
 import time
 import pickle
@@ -10,9 +9,6 @@ import os
 import gc
 from tqdm import tqdm
 from toy_models.Qiter import vis_g
-
-
-
 
 
 class test_summary():
@@ -120,12 +116,13 @@ class test_summary():
 # baseline = test_summary(alg=alg, problem=problem, num_instance=100)
 # baseline.run_test(explore_prob=1.0)
 # baseline.show_result()
-folder = 'Models/dqn_0114_base/'
+folder = 'Models/dqn_0116_base/'
+# folder = 'Models/dqn_0116_nox/'
 # folder = 'Models/dqn_test_not_sample_batch_episode/'
-with open(folder + 'dqn_' + str(5000), 'rb') as model_file:
-    alg = pickle.load(model_file)
+with open(folder + 'dqn_' + str(4000), 'rb') as model_file:
+    alg1 = pickle.load(model_file)
 problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
-test1 = test_summary(alg=alg, problem=problem, num_instance=100)
+test1 = test_summary(alg=alg1, problem=problem, num_instance=100)
 test1.run_test(episode_len=50, explore_prob=0.0, time_aware=False)
 test1.show_result()
 

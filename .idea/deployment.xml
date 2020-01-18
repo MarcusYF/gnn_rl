@@ -2,20 +2,6 @@
 <project version="4">
   <component name="PublishConfigData" autoUpload="Always" serverName="hcdm3" autoUploadExternalChanges="true" showAutoUploadSettingsWarning="false">
     <serverData>
-      <paths name="Copy of project-level server 'hcdm1'">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/mnt/code/research/RL4CombOptm/MinimumVertexCover_DRL" local="$PROJECT_DIR$" web="/" />
-          </mappings>
-        </serverdata>
-      </paths>
-      <paths name="fy4bc@128.143.67.123:22 (2)">
-        <serverdata>
-          <mappings>
-            <mapping deploy="/u/fy4bc/code/research/RL4CombOptm/gnn_rl" local="$PROJECT_DIR$" />
-          </mappings>
-        </serverdata>
-      </paths>
       <paths name="hcdm1">
         <serverdata>
           <mappings>
@@ -26,7 +12,7 @@
       <paths name="hcdm3">
         <serverdata>
           <mappings>
-            <mapping deploy="/code/research/RL4CombOptm/gnn_rl" local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="/u/fy4bc/code/research/RL4CombOptm/gnn_rl" local="$PROJECT_DIR$" />
           </mappings>
         </serverdata>
       </paths>

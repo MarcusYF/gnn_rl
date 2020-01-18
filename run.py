@@ -9,7 +9,6 @@ from DQN import DQN
 from k_cut import *
 import argparse
 import matplotlib.pyplot as plt
-from smooth_signal import smooth
 import numpy as np
 import time
 import torch
@@ -146,6 +145,11 @@ def run_dqn(alg):
             alg.eps = eps[-1]
         else:
             alg.eps = eps[i]
+
+        if i == 0:
+            # init the replay buffer at the beginning
+            for ii in range(replay_buffer_size):
+                alg.run_episode(action_type=alg.action_type, gnn_step=gnn_step, episode_len=episode_len, print_info=False)
 
         T1 = time.time()
         # TODO memory usage :: episode_len * num_episodes * hidden_dim
