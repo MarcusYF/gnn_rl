@@ -95,7 +95,8 @@ ddqn = bool(args['ddqn'])
 os.environ['CUDA_VISIBLE_DEVICES'] = gpu
 
 # current working path
-path = 'Models/' + save_folder + '/'
+absroot = os.path.dirname(os.getcwd())
+path = absroot + '/Models/' + save_folder + '/'
 if not os.path.exists(path):
     os.makedirs(path)
 
