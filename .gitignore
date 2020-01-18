@@ -2,3 +2,5 @@ Models/
 Data/
 toy_models/.png
 Analysis/.png
+.idea/
+__pycache__/
