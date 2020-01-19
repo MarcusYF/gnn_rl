@@ -4,16 +4,9 @@ Created on Sun Dec 30 16:20:39 2018
 
 @author: orrivlin
 """
-import torch
-import numpy as np
-import dgl
-import torch.nn.functional as F
-from copy import deepcopy as dc
 import os
 from k_cut import *
-from Utils import stack_indices, stack_list_indices, max_graph_array
-from log_utils import mean_val, logger
-import gc
+from log_utils import logger
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 

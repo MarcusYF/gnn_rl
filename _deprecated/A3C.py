@@ -10,7 +10,7 @@ import dgl
 import torch.nn.functional as F
 from copy import deepcopy as dc
 from Models_KCut import ACNet
-from Utils import stack_indices, stack_list_indices, max_graph_array
+from _deprecated.Utils import stack_indices, stack_list_indices, max_graph_array
 from log_utils import mean_val, logger
 
 
