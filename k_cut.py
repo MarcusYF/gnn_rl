@@ -114,7 +114,8 @@ class KCut_DGL():
 
     def reset(self, compute_S=True):
         self.g = generate_G(self.k, self.m, self.adjacent_reserve, self.hidden_dim, random_sample_node=self.random_sample_node, x=self.x, random_init_label=self.random_init_label, label=self.label, a=self.a)['g']
-        self.S = self.calc_S()
+        if compute_S:
+            self.S = self.calc_S()
         return self.g
 
     def reset_label(self, label, g=None, calc_S=True, rewire_edges=True):

@@ -15,6 +15,7 @@ class test_summary():
 
     def __init__(self, alg, problem, num_instance=100):
         self.alg = alg
+        # self.alg = alg.model
         self.problem = problem
         self.num_instance = num_instance
         self.episodes = []
@@ -40,7 +41,7 @@ class test_summary():
         for i in range(episode_len):
             legal_actions = test_problem.get_legal_actions()
 
-            S_a_encoding, h1, h2, Q_sa = self.alg.model(dgl.batch([g]), legal_actions.cuda(), gnn_step=gnn_step,
+            S_a_encoding, h1, h2, Q_sa = self.alg(dgl.batch([g]), legal_actions.cuda(), gnn_step=gnn_step,
                                                    time_aware=time_aware, remain_episode_len=episode_len - i - 1)
 
             # epsilon greedy strategy
@@ -122,7 +123,7 @@ folder = 'Models/dqn_0116_base/'
 with open(folder + 'dqn_' + str(4000), 'rb') as model_file:
     alg1 = pickle.load(model_file)
 problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
-test1 = test_summary(alg=alg1, problem=problem, num_instance=100)
+test1 = test_summary(alg=model, problem=problem, num_instance=100)
 test1.run_test(episode_len=50, explore_prob=0.0, time_aware=False)
 test1.show_result()
 

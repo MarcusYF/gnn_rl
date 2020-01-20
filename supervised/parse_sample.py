@@ -1,9 +1,7 @@
 import os
 import pickle
-import time
 from k_cut import *
-from DQN import DQN, to_cuda
-import dgl
+from DQN import to_cuda
 import torch
 from tqdm import tqdm
 import random
@@ -87,7 +85,6 @@ class data_handler():
         batch_sample = []
         for i in range(batch_size):
             pi, si, ai = p_s_a_idx[i]
-            p = self.data_chunks[pi][0]
             q_tb = self.data_chunks[pi][1]
             s = list(q_tb.keys())[si]
             a = list(q_tb[s].keys())[ai]
@@ -97,7 +94,7 @@ class data_handler():
                 s = [m[x] for x in QtableKey2state(s)]
             else:
                 s = QtableKey2state(s)
-            batch_sample.append(Psar(p, s, a, r))
+            batch_sample.append(Psar(self.data_chunks[pi][0], s, a, r))
         return batch_sample
 
 
@@ -109,74 +106,3 @@ def map_psar2g(psar, hidden_dim=16, rewire_edges=False):
     g = to_cuda(psar.p.g)
     g.ndata['h'] = torch.zeros((g.number_of_nodes(), hidden_dim)).cuda()
     return g
-
-
-
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-action_type = 'swap'
-k = 3
-m = 3
-ajr = 5
-hidden_dim = 16
-extended_h = True
-lr = 1e-4
-n_epoch = 5000
-save_ckpt_step = 500
-batch_size = 1000
-gnn_step = 3
-
-problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=hidden_dim)
-model = DQNet(k=k, m=m, ajr=ajr, num_head=4, hidden_dim=hidden_dim, extended_h=extended_h).cuda()
-optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-
-# Construct data reader
-dh = data_handler(data_chunks=data_chunks, batch_size=batch_size)
-dh.build_one_pass_index()
-
-absroot = os.path.dirname(os.getcwd())
-path = absroot + '/Models/sup_base/'
-if not os.path.exists(path):
-    os.makedirs(path)
-with open(path + 'sup_0', 'wb') as model_file:
-    pickle.dump(model, model_file)
-
-for i in tqdm(range(n_epoch)):
-
-    if i % save_ckpt_step == save_ckpt_step - 1:
-        with open(path + 'sup_' + str(i + 1), 'wb') as model_file:
-            pickle.dump(alg, model_file)
-        with open(path + 'sup_' + str(i + 1), 'rb') as model_file:
-            alg = pickle.load(model_file)
-
-
-    T1 = time.time()
-    current_batch = dh.sample_batch(batch_idx=i)
-
-    T2 = time.time()
-    batch_state = dgl.batch([map_psar2g(pasr) for pasr in current_batch])
-    T3 = time.time()
-    batch_action = [torch.tensor(pasr.a).unsqueeze(0) for pasr in current_batch]
-    batch_action = torch.cat(batch_action, axis=0).cuda()
-    target_Q = torch.tensor([pasr.r for pasr in current_batch]).cuda()
-    T4 = time.time()
-
-
-    S_a_encoding, h1, h2, Q_sa = model(batch_state, batch_action)
-    T5 = time.time()
-    optimizer.zero_grad()
-    L = torch.pow(Q_sa - target_Q, 2).sum()
-    L.backward()
-    optimizer.step()
-    T6 = time.time()
-
-    print('\nEpoch: {}. Loss: {}. T: {}.'
-              .format(i
-               , np.round(L.detach().item(), 2)
-               # , np.round(T2-T1, 3)
-               # , np.round(T3 - T2, 3)
-               # , np.round(T4 - T3, 3), np.round(T5-T4, 3)
-               , np.round(T6-T1, 3)))
-
-
-
-

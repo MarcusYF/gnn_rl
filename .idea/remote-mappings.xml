@@ -17,6 +17,7 @@
             </list>
           </settings>
         </remote-mappings>
+        <remote-mappings server-id="python@sftp://fy4bc@128.143.67.123:22/u/fy4bc/anaconda3/bin/python" />
       </list>
     </list>
   </component>
