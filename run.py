@@ -43,6 +43,7 @@ parser.add_argument('--m', default=3, help="cluster size")
 parser.add_argument('--ajr', default=5, help="")
 parser.add_argument('--h', default=16, help="hidden dimension")
 parser.add_argument('--extend_h', default=True)
+parser.add_argument('--use_x', default=True)
 parser.add_argument('--time_aware', default=False)
 parser.add_argument('--a', default=1, help="")
 parser.add_argument('--gamma', type=float, default=0.9, help="")
@@ -73,6 +74,7 @@ m = int(args['m'])
 ajr = int(args['ajr'])
 h = int(args['h'])
 extend_h = bool(args['extend_h'])
+use_x = bool(args['use_x'])
 time_aware = bool(args['time_aware'])
 a = int(args['a'])
 gamma = float(args['gamma'])
@@ -95,8 +97,8 @@ ddqn = bool(args['ddqn'])
 os.environ['CUDA_VISIBLE_DEVICES'] = gpu
 
 # current working path
-absroot = os.path.dirname(os.getcwd())
-path = absroot + '/Models/' + save_folder + '/'
+# absroot = os.path.dirname(os.getcwd())
+path = os.path.abspath(os.path.join(os.getcwd(), "..")) + '/Models/' + save_folder + '/'
 if not os.path.exists(path):
     os.makedirs(path)
 
@@ -111,6 +113,7 @@ if not resume:
               , replay_buffer_max_size=replay_buffer_size
               , extended_h=extend_h
               , time_aware=time_aware
+              , use_x=use_x
               , cuda_flag=True)
     with open(path + 'dqn_0', 'wb') as model_file:
         pickle.dump(alg, model_file)

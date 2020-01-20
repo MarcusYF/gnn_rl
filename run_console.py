@@ -13,6 +13,7 @@ m = 3
 ajr = 5
 hidden_dim = 16
 extended_h = True
+use_x = False
 time_aware = False
 a = 1
 gamma = 0.90
@@ -36,6 +37,7 @@ alg = DQN(problem, action_type=action_type
           , gamma=gamma, eps=.1, lr=lr
           , replay_buffer_max_size=replay_buffer_max_size
           , extended_h=extended_h
+          , use_x=use_x
           , time_aware=time_aware
           , cuda_flag=True)
 

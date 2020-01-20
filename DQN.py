@@ -12,7 +12,6 @@ import torch.nn.functional as F
 from copy import deepcopy as dc
 import pickle
 import os
-from test import *
 from log_utils import mean_val, logger
 from k_cut import *
 
@@ -142,7 +141,7 @@ def weight_monitor(model, model_target):
 
 
 class DQN:
-    def __init__(self, problem, action_type='swap', gamma=1.0, eps=0.1, lr=1e-4, replay_buffer_max_size=10, extended_h=False, time_aware=False, cuda_flag=True):
+    def __init__(self, problem, action_type='swap', gamma=1.0, eps=0.1, lr=1e-4, replay_buffer_max_size=10, extended_h=False, time_aware=False, use_x=True, cuda_flag=True):
 
         self.problem = problem
         self.action_type = action_type
@@ -154,10 +153,11 @@ class DQN:
         self.n = self.k * self.m  # num of nodes
         self.eps = eps  # constant for exploration in dqn
         self.extended_h = extended_h
+        self.use_x = use_x
         if cuda_flag:
-            self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim, extended_h=self.extended_h).cuda()
+            self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim, extended_h=self.extended_h, use_x=self.use_x).cuda()
         else:
-            self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim, extended_h=self.extended_h)
+            self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim, extended_h=self.extended_h, use_x=self.use_x)
         # self.model.apply(self.weights_init)  # initialize weight
         self.model_target = dc(self.model)
         self.gamma = gamma  # reward decay const

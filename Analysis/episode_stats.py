@@ -5,8 +5,7 @@ import numpy as np
 import time
 import pickle
 import torch
-import os
-import gc
+from DQN import DQN
 from tqdm import tqdm
 from toy_models.Qiter import vis_g
 
@@ -14,7 +13,14 @@ from toy_models.Qiter import vis_g
 class test_summary():
 
     def __init__(self, alg, problem, num_instance=100):
-        self.alg = alg
+        if isinstance(alg, DQN):
+            self.alg = alg.model
+        else:
+            self.alg = alg
+        if isinstance(problem, list):
+            self.retain_test = True
+        else:
+            self.retain_test = False
         self.problem = problem
         self.num_instance = num_instance
         self.episodes = []
@@ -31,16 +37,19 @@ class test_summary():
     def test_greedy(self):
         return
 
-    def test_model(self, gnn_step=3, episode_len=50, explore_prob=0.1, time_aware=False):
-        self.problem.reset()
-        test_problem = self.problem
+    def test_model(self, problem=None, gnn_step=3, episode_len=50, explore_prob=0.1, time_aware=False):
+        if problem is None:
+            self.problem.reset()
+            test_problem = self.problem
+        else:
+            test_problem = problem
         S = test_problem.calc_S()
         g = to_cuda(test_problem.g)
         ep = EpisodeHistory(g, max_episode_len=episode_len)
         for i in range(episode_len):
             legal_actions = test_problem.get_legal_actions()
 
-            S_a_encoding, h1, h2, Q_sa = self.alg.model(dgl.batch([g]), legal_actions.cuda(), gnn_step=gnn_step,
+            S_a_encoding, h1, h2, Q_sa = self.alg(dgl.batch([g]), legal_actions.cuda(), gnn_step=gnn_step,
                                                    time_aware=time_aware, remain_episode_len=episode_len - i - 1)
 
             # epsilon greedy strategy
@@ -58,8 +67,10 @@ class test_summary():
     def run_test(self, episode_len=50, explore_prob=.0, time_aware=False, criteria='end'):
 
         for _ in tqdm(range(self.num_instance)):
-            self.problem.reset()
-            s, ep = self.test_model(episode_len=episode_len, explore_prob=explore_prob, time_aware=time_aware)
+            if self.retain_test:
+                s, ep = self.test_model(problem=self.problem[i], episode_len=episode_len, explore_prob=explore_prob, time_aware=time_aware)
+            else:
+                s, ep = self.test_model(episode_len=episode_len, explore_prob=explore_prob, time_aware=time_aware)
             self.S.append(s.item())
             self.episodes.append((ep))
             if criteria == 'max':
@@ -81,13 +92,47 @@ class test_summary():
         print('Avg percentage max gain:', np.mean(self.max_gain_ratio))
         print('Percentage of instances with positive gain:', len([x for x in self.max_gain if x > 0]) / self.num_instance)
 
-# save version 2020.1.6 and continue to train alg
-# alg_first_work_version = dc(alg)
-# alg_q_110 = dc(alg)
+
+folder = '/u/fy4bc/code/research/RL4CombOptm/Models/dqn_0114_base/'
+with open(folder + 'dqn_' + str(5000), 'rb') as model_file:
+    model = pickle.load(model_file)
+
+with open('/u/fy4bc/code/research/RL4CombOptm/Data/qiter33/qtable_chunk_18_0', 'rb') as data_file:
+    data_test = pickle.load(data_file)
+
+# problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
+
+problem = [data_test[i][0] for i in range(100)]
+for i in range(100):
+    problem[i].g.ndata['h'] = torch.zeros((9, 16)).cuda()
+    problem[i].reset_label(label=[0,0,0,1,1,1,2,2,2], calc_S=False, rewire_edges=True)
+
+test1 = test_summary(alg=model, problem=problem, num_instance=100)
+test1.run_test(episode_len=50, explore_prob=0, time_aware=False)
+test1.show_result()
 
 
+episode_len = 50
 
+test_problem = test.episodes[0].
+S = test_problem.calc_S()
+g = to_cuda(test_problem.g)
+ep = EpisodeHistory(g, max_episode_len=episode_len)
 
+i = 0
+legal_actions = test_problem.get_legal_actions()
+
+S_a_encoding, h1, h2, Q_sa = alg.model(dgl.batch([g]), legal_actions.cuda(), gnn_step=3)
+
+# epsilon greedy strategy
+if torch.rand(1) > explore_prob:
+    action_idx = Q_sa.argmax()
+else:
+    action_idx = torch.randint(high=legal_actions.shape[0], size=(1,)).squeeze()
+swap_i, swap_j = legal_actions[action_idx]
+state, reward = test_problem.step((swap_i, swap_j))
+ep.write((swap_i, swap_j), action_idx, reward)
+g = to_cuda(state)
 
 
 # buf = alg.experience_replay_buffer[-1]
@@ -116,14 +161,14 @@ class test_summary():
 # baseline = test_summary(alg=alg, problem=problem, num_instance=100)
 # baseline.run_test(explore_prob=1.0)
 # baseline.show_result()
-folder = 'Models/dqn_0116_base/'
+folder = '/u/fy4bc/code/research/RL4CombOptm' + '/Models/dqn_0114_base/'
 # folder = 'Models/dqn_0116_nox/'
 # folder = 'Models/dqn_test_not_sample_batch_episode/'
-with open(folder + 'dqn_' + str(4000), 'rb') as model_file:
-    alg1 = pickle.load(model_file)
+with open(folder + 'dqn_' + str(5000), 'rb') as model_file:
+    model = pickle.load(model_file)
 problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
-test1 = test_summary(alg=alg1, problem=problem, num_instance=100)
-test1.run_test(episode_len=50, explore_prob=0.0, time_aware=False)
+test1 = test_summary(alg=model, problem=problem, num_instance=100)
+test1.run_test(episode_len=50, explore_prob=0, time_aware=False)
 test1.show_result()
 
 test2 = test_summary(alg=alg, problem=problem, num_instance=100)

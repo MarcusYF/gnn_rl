@@ -114,7 +114,8 @@ class KCut_DGL():
 
     def reset(self, compute_S=True):
         self.g = generate_G(self.k, self.m, self.adjacent_reserve, self.hidden_dim, random_sample_node=self.random_sample_node, x=self.x, random_init_label=self.random_init_label, label=self.label, a=self.a)['g']
-        self.S = self.calc_S()
+        if compute_S:
+            self.S = self.calc_S()
         return self.g
 
     def reset_label(self, label, g=None, calc_S=True, rewire_edges=True):
@@ -240,7 +241,6 @@ class KCut_DGL():
             else:
                 reward = torch.sqrt(torch.sum(torch.pow(old, 2), axis=1)).sum() \
                         - torch.sqrt(torch.sum(torch.pow(new, 2), axis=1)).sum()
-                - torch.sqrt(torch.sum(torch.pow(new, 2), axis=1)).sum()
 
             # flip node
             state.nodes[i].data['label'] = torch.nn.functional.one_hot(torch.tensor([target_label]), self.k).float()
@@ -277,7 +277,7 @@ def reduce(nodes):
 
 
 class NodeApplyModule(nn.Module):
-    def __init__(self, k, m, ajr, hidden_dim, activation):
+    def __init__(self, k, m, ajr, hidden_dim, activation, use_x=True):
         super(NodeApplyModule, self).__init__()
         self.ajr = ajr
         self.m = m
@@ -292,6 +292,7 @@ class NodeApplyModule(nn.Module):
         self.t4 = nn.Linear(1, hidden_dim, bias=False)
 
         self.activation = activation
+        self.use_x = int(use_x)
 
     def forward(self, node):
         x = node.data['x']
@@ -305,7 +306,7 @@ class NodeApplyModule(nn.Module):
         n1_w = node.data['n1_w']  # weight
 
         h = self.activation(0
-                            # + self.l0(x)
+                            + self.l0(x) * self.use_x
                             + self.l1(l)
                             + self.l2(n1_h)
                             # + self.l3(n2_v)
@@ -323,9 +324,9 @@ class NodeApplyModule(nn.Module):
 
 
 class GCN(nn.Module):
-    def __init__(self, k, m, ajr, hidden_dim, activation):
+    def __init__(self, k, m, ajr, hidden_dim, activation, use_x=True):
         super(GCN, self).__init__()
-        self.apply_mod = NodeApplyModule(k, m, ajr, hidden_dim, activation)
+        self.apply_mod = NodeApplyModule(k, m, ajr, hidden_dim, activation, use_x=use_x)
 
     def forward(self, g, feature):
         g.ndata['h'] = feature
@@ -426,7 +427,7 @@ class PositionalEncoding(nn.Module):
 
 class DQNet(nn.Module):
     # TODO k, m, ajr should be excluded::no generalization
-    def __init__(self, k, m, ajr, num_head, hidden_dim, extended_h=False):
+    def __init__(self, k, m, ajr, num_head, hidden_dim, extended_h=False, use_x=True):
         super(DQNet, self).__init__()
         self.k = k
         self.m = m
@@ -438,7 +439,7 @@ class DQNet(nn.Module):
             self.hidden_dim += k
         self.value1 = nn.Linear(num_head*self.hidden_dim, hidden_dim//2)
         self.value2 = nn.Linear(hidden_dim//2, 1)
-        self.layers = nn.ModuleList([GCN(k, m, ajr, hidden_dim, F.relu)])
+        self.layers = nn.ModuleList([GCN(k, m, ajr, hidden_dim, F.relu, use_x=use_x)])
         self.MHA = MultiHeadedAttention(h=num_head
                            , d_model=num_head*self.hidden_dim
                            , dropout=0.0

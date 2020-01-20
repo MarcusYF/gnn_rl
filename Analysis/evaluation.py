@@ -9,14 +9,14 @@ import os
 import gc
 from tqdm import tqdm
 from toy_models.Qiter import vis_g
-# import Analysis.episode_stats.test_summary,test_model
+from Analysis.episode_stats import test_summary
 
 # folder = 'Models/dqn_0113_test_qstep/'
 # folder = 'Models/dqn_test_not_sample_batch_episode/'
-folder = 'Models/dqn_0116_nox/'
+folder = '/u/fy4bc/code/research/RL4CombOptm' + '/Models/dqn_0114_base/'
 # folder = 'Models/dqn_0113_test_eps0/'
 # folder = 'Models/dqn_test_centroid_h16/'
-with open(folder + 'dqn_' + str(4000), 'rb') as model_file:
+with open(folder + 'dqn_' + str(5000), 'rb') as model_file:
     alg = pickle.load(model_file)
 
 x = []
@@ -24,6 +24,10 @@ for i in range(alg.experience_replay_buffer.__len__()):
     x.append(sum(alg.experience_replay_buffer[i].reward_seq))
 sum(x)
 
+problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
+test = test_summary(alg=alg, problem=problem, num_instance=100)
+test.run_test(episode_len=50, explore_prob=.1, time_aware=False)
+test.show_result()
 # scp -r /u/fy4bc/code/research/RL4CombOptm/gnn_rl/Models/dqn_0113_test_eps0 fy4bc@128.143.69.125:/home/fy4bc/mnt/code/research/RL4CombOptm/MinimumVertexCover_DRL/Models/
 
 13.7886
@@ -34,6 +38,8 @@ sum(x)
 97.5171
 109.9404
 106.3062
+
+
 
 # plot Q-loss/Reward curve
 fig_name = 'return-base-9'
