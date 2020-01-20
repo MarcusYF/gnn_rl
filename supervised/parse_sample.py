@@ -68,4 +68,3 @@ for i in 100:
     optm.step()
 
 
-
