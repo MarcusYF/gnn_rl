@@ -7,13 +7,17 @@ from tqdm import tqdm
 import random
 from Qiter_swap import QtableKey2state
 from dataclasses import dataclass
+import numpy as np
 
 @dataclass
-class Psar:
+class Psaq:
     p: KCut_DGL
     s: list
     a: tuple
-    r: float
+    best_a: tuple
+    q: float
+    best_q: float
+
 
 
 class data_handler():
@@ -67,7 +71,7 @@ class data_handler():
     def sample_batch_index(self, batch_idx=0):
         batch_size = self.batch_size
         off_set = batch_idx * batch_size
-        if batch_size + off_set > self.n:
+        if batch_size + off_set > self.n * (self.data_pass + 1):
             self.data_pass += 1
             print('One pass over. Re-indexing...')
             self.build_one_pass_index()
@@ -87,14 +91,20 @@ class data_handler():
             pi, si, ai = p_s_a_idx[i]
             q_tb = self.data_chunks[pi][1]
             s = list(q_tb.keys())[si]
-            a = list(q_tb[s].keys())[ai]
-            r = q_tb[s][a][1]
+            q_tb_s = q_tb[s]
+            all_actions = list(q_tb_s.keys())
+            a = all_actions[ai]
+            q = q_tb_s[a][1]
+            best_a_i = np.argmax([q_tb_s[a_][1] for a_ in all_actions])
+            best_a = all_actions[best_a_i]
+            best_q = q_tb_s[best_a][1]
+
             if self.rotate_label:
                 m = self.label_map[label_permute_seed[i]]
                 s = [m[x] for x in QtableKey2state(s)]
             else:
                 s = QtableKey2state(s)
-            batch_sample.append(Psar(self.data_chunks[pi][0], s, a, r))
+            batch_sample.append(Psaq(self.data_chunks[pi][0], s, a, best_a, q, best_q))
         return batch_sample
 
 

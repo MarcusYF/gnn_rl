@@ -6,9 +6,11 @@ import dgl
 import torch
 from tqdm import tqdm
 from supervised.parse_sample import data_handler, map_psar2g
+from torch.optim import lr_scheduler
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 action_type = 'swap'
+loss_fc = 'pairwise'
 k = 3
 m = 3
 ajr = 5
@@ -18,7 +20,7 @@ use_x = False
 lr = 1e-4
 n_epoch = 20000
 save_ckpt_step = 5000
-num_chunks = 40
+num_chunks = 1
 batch_size = 1000
 gnn_step = 3
 
@@ -50,19 +52,31 @@ for i in tqdm(range(n_epoch)):
     T1 = time.time()
     current_batch = dh.sample_batch(batch_idx=i)
 
-    T2 = time.time()
-    batch_state = dgl.batch([map_psar2g(pasr) for pasr in current_batch])
-    T3 = time.time()
-    batch_action = [torch.tensor(pasr.a).unsqueeze(0) for pasr in current_batch]
+    batch_state = dgl.batch([map_psar2g(psaq) for psaq in current_batch])
+
+    batch_action = [torch.tensor(psaq.a).unsqueeze(0) for psaq in current_batch]
     batch_action = torch.cat(batch_action, axis=0).cuda()
-    target_Q = torch.tensor([pasr.r for pasr in current_batch]).cuda()
-    T4 = time.time()
+    if loss_fc == 'pairwise':
+        batch_best_action = [torch.tensor(psaq.best_a).unsqueeze(0) for psaq in current_batch]
+        batch_best_action = torch.cat(batch_best_action, axis=0).cuda()
+        batch_action = torch.cat([batch_action, batch_best_action], axis=1).view(-1, 2).cuda()
 
 
     S_a_encoding, h1, h2, Q_sa = model(batch_state, batch_action)
-    T5 = time.time()
+
+    if loss_fc == 'pairwise':
+        target_Q = Q_sa[0::2]
+        best_Q = Q_sa[1::2]
+        L = F.relu(target_Q - best_Q)
+    else:
+        target_Q = torch.tensor([psaq.q for psaq in current_batch]).cuda()
+        # assign different weight to different target q-values
+        best_Q = torch.tensor([psaq.best_q for psaq in current_batch]).cuda()
+        L = torch.pow(Q_sa - target_Q, 2) / (0.1 + best_Q - target_Q) \
+         + 1.6 * F.relu(Q_sa - best_Q)
+
+    L = L.sum()
     optimizer.zero_grad()
-    L = torch.pow(Q_sa - target_Q, 2).sum()
     L.backward()
     Loss.append(L.detach().item())
     model.h_residual.append(Loss[-1])

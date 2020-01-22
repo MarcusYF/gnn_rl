@@ -16,7 +16,7 @@ from Analysis.episode_stats import test_summary
 folder = '/u/fy4bc/code/research/RL4CombOptm' + '/Models/dqn_0114_base/'
 # folder = 'Models/dqn_0113_test_eps0/'
 # folder = 'Models/dqn_test_centroid_h16/'
-with open(folder + 'dqn_' + str(5000), 'rb') as model_file:
+with open(folder + 'dqn_' + str(500), 'rb') as model_file:
     alg = pickle.load(model_file)
 
 x = []
@@ -26,7 +26,7 @@ sum(x)
 
 problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
 test = test_summary(alg=alg, problem=problem, num_instance=100)
-test.run_test(episode_len=50, explore_prob=.1, time_aware=False)
+test.run_test(episode_len=50, explore_prob=.0, time_aware=False, softmax_constant=1e10)
 test.show_result()
 # scp -r /u/fy4bc/code/research/RL4CombOptm/gnn_rl/Models/dqn_0113_test_eps0 fy4bc@128.143.69.125:/home/fy4bc/mnt/code/research/RL4CombOptm/MinimumVertexCover_DRL/Models/
 

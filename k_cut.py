@@ -304,7 +304,6 @@ class NodeApplyModule(nn.Module):
 
         n1_h = node.data['n1_h']
         n1_w = node.data['n1_w']  # weight
-
         h = self.activation(0
                             + self.l0(x) * self.use_x
                             + self.l1(l)
@@ -519,25 +518,36 @@ class DQNet(nn.Module):
 
         return S_a_encoding, h_new, g.ndata['h'], Q_sa
 
-    def forward_mha(self, g, gnn_step):
+    def forward_mha(self, g, actions=None, action_type='swap', gnn_step=3):
         n = self.n
         k = self.k
         m = self.m
         hidden_dim = self.hidden_dim
         num_head = self.num_head
 
+        if isinstance(g, BatchedDGLGraph):
+            batch_size = g.batch_size
+            num_action = actions.shape[0] // batch_size
+        else:
+            num_action = actions.shape[0]
+
         h = g.ndata['h']
-        self.h_residual = []
+
         for i in range(gnn_step):
             for conv in self.layers:
-                h_new = conv(g, h)
-                self.h_residual.append(torch.norm(h_new-h).detach())
-                h = h_new
+                h = conv(g, h)
 
+        # if use extend h
+        if self.extended_h:
+            g.ndata['h'] = torch.cat([h, g.ndata['label']], dim=1)
+        else:
+            g.ndata['h'] = h
+
+        h_new = h
         # pe = PositionalEncoding(h.shape[1], dropout=0, max_len=max_step)
         # g.ndata['h'] = torch.cat([pe(h, remain_step), g.ndata['x'], g.ndata['label']], dim=1)
         # g.ndata['h'] = torch.cat([h, g.ndata['x'], g.ndata['label']], dim=1)
-        g.ndata['h'] = h
+        # g.ndata['h'] = h
 
         # compute centroid embedding c_i
         # gc_x = torch.mm(g.ndata['x'].t(), g.ndata['label']) / m
@@ -568,7 +578,7 @@ class DQNet(nn.Module):
                            , Q1[:, hidden_dim * 2:hidden_dim * 3]]
                        , axis=1)
 
-        S_a_encoding = self.MHA(Q1, key, value) + self.MHA(Q2, key, value)
+        S_a_encoding = self.MHA(Q1, key, value) + self.MHA(Q2, key, value)  # (4*h) * 1
         # mN = dgl.mean_nodes(g, 'h')
         # PI = self.policy(g.ndata['h'])
         Q_sa = self.value2(F.relu(self.value1(S_a_encoding)))
