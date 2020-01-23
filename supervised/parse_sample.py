@@ -1,4 +1,6 @@
+import sys
 import os
+sys.path.append(os.path.abspath(os.path.join(os.getcwd(), "..")))
 import pickle
 from k_cut import *
 from DQN import to_cuda
@@ -116,3 +118,42 @@ def map_psar2g(psar, hidden_dim=16, rewire_edges=False):
     g = to_cuda(psar.p.g)
     g.ndata['h'] = torch.zeros((g.number_of_nodes(), hidden_dim)).cuda()
     return g
+
+if __name__ == '__main__':
+
+    num_chunks = 100
+    batch_size = 1000
+    bundle_size = 500
+
+    dh = data_handler(path='/u/fy4bc/code/research/RL4CombOptm/Data/'
+                      , num_chunks=num_chunks
+                      , batch_size=batch_size)
+    n_record = dh.num_instance * dh.num_action * dh.num_state  # 74844000
+    dh.build_one_pass_index()
+
+    data_object = []
+    j = 0
+    for i in tqdm(range(n_record//batch_size)):
+
+        current_batch = dh.sample_batch(batch_idx=i)
+
+        batch_state = dgl.batch([map_psar2g(psaq) for psaq in current_batch])
+
+        batch_action = [torch.tensor(psaq.a).unsqueeze(0) for psaq in current_batch]
+        batch_action = torch.cat(batch_action, axis=0)
+
+        batch_best_action = [torch.tensor(psaq.best_a).unsqueeze(0) for psaq in current_batch]
+        batch_best_action = torch.cat(batch_best_action, axis=0)
+
+
+        target_Q = torch.tensor([psaq.q for psaq in current_batch])
+
+        best_Q = torch.tensor([psaq.best_q for psaq in current_batch])
+
+        data_object.append((batch_state, batch_action, batch_best_action, target_Q, best_Q))
+
+        if i % bundle_size == bundle_size - 1:
+            with open('/net/bigtemp/fy4bc/Data/gnn_rl/sup_B1000/batch_' + str(j), 'wb') as dump_file:
+                pickle.dump(data_object, dump_file)
+            j += 1
+            data_object = []

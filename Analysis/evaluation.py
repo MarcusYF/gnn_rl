@@ -13,10 +13,10 @@ from Analysis.episode_stats import test_summary
 
 # folder = 'Models/dqn_0113_test_qstep/'
 # folder = 'Models/dqn_test_not_sample_batch_episode/'
-folder = '/u/fy4bc/code/research/RL4CombOptm' + '/Models/dqn_0114_base/'
+folder = '/u/fy4bc/code/research/RL4CombOptm' + '/Models/dqn_0122_nox/'
 # folder = 'Models/dqn_0113_test_eps0/'
 # folder = 'Models/dqn_test_centroid_h16/'
-with open(folder + 'dqn_' + str(500), 'rb') as model_file:
+with open(folder + 'dqn_' + str(5000), 'rb') as model_file:
     alg = pickle.load(model_file)
 
 x = []

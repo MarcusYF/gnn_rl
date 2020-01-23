@@ -100,8 +100,8 @@ class test_summary():
 
         print('Avg value of initial S:', np.mean(self.S))
         print('Avg max gain:', np.mean(self.max_gain))
-        print('Avg max gain budget:', np.mean(self.max_gain_budget))
-        print('Var max gain budget:', np.std(self.max_gain_budget))
+        # print('Avg max gain budget:', np.mean(self.max_gain_budget))
+        # print('Var max gain budget:', np.std(self.max_gain_budget))
         print('Avg percentage max gain:', np.mean(self.max_gain_ratio))
         print('Percentage of instances with positive gain:', len([x for x in self.max_gain if x > 0]) / self.num_instance)
 

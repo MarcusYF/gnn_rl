@@ -11,7 +11,7 @@ from supervised.parse_sample import data_handler, map_psar2g
 import argparse
 from torch.optim import lr_scheduler
 
-# python run.py --save_folder=test --use_x=0 --gpu=2 --loss_fc=single --alpha=111 --lambda=666
+# python run.py --save_folder=sup_0122_nox_lp --gpu=0 --loss_fc=pairwise --alpha=1 --lambda=1
 
 parser = argparse.ArgumentParser(description="GNN with Supervised Learning")
 parser.add_argument('--save_folder', default='test')
@@ -112,15 +112,17 @@ def run_supervised_training(model):
             batch_action = torch.cat([batch_action, batch_best_action], axis=1).view(-1, 2).cuda()
 
         S_a_encoding, h1, h2, Q_sa = model(batch_state, batch_action)
+        target_Q = torch.tensor([psaq.q for psaq in current_batch]).cuda()
+        # assign different weight to different target q-values
+        best_Q = torch.tensor([psaq.best_q for psaq in current_batch]).cuda()
 
         if loss_fc == 'pairwise':
-            target_Q = Q_sa[0::2]
-            best_Q = Q_sa[1::2]
-            L = F.relu(target_Q - best_Q)
+            cur_a_Q = Q_sa[0::2]
+            best_a_Q = Q_sa[1::2]
+            L = torch.pow(cur_a_Q - target_Q, 2) \
+                + torch.pow(best_a_Q - best_Q, 2) * alpha \
+                + lambd * F.relu(cur_a_Q - best_a_Q)
         else:
-            target_Q = torch.tensor([psaq.q for psaq in current_batch]).cuda()
-            # assign different weight to different target q-values
-            best_Q = torch.tensor([psaq.best_q for psaq in current_batch]).cuda()
             L = torch.pow(Q_sa - target_Q, 2) / (alpha + best_Q - target_Q) \
                 + lambd * F.relu(Q_sa - best_Q)
 
