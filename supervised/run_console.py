@@ -8,9 +8,9 @@ from tqdm import tqdm
 from supervised.parse_sample import data_handler, map_psar2g
 from torch.optim import lr_scheduler
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 action_type = 'swap'
-loss_fc = 'pairwise'
+loss_fc = '-pairwise'
 k = 3
 m = 3
 ajr = 5

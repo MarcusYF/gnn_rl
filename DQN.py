@@ -40,12 +40,15 @@ class EpisodeHistory:
         self.action_seq = []
         self.action_indices = []
         self.reward_seq = []
+        self.calib_reward_seq = []
         if self.action_type == 'swap':
             self.label_perm = torch.tensor(range(self.n)).unsqueeze(0)
         if self.action_type == 'flip':
             self.label_perm = self.init_state.ndata['label'].nonzero()[:, 1].unsqueeze(0)
-        self.visited_state = set([''.join([str(i.item()) for i in torch.tensor(range(self.n)).unsqueeze(0)[0]])])
-        self.node_visit_cnt = [0] * self.n
+        # self.visited_state = set([''.join([str(i.item()) for i in torch.tensor(range(self.n)).unsqueeze(0)[0]])])
+        # self.node_visit_cnt = [0] * self.n
+        self.best_gain_sofar = 0
+        self.current_gain = 0
 
     def perm_label(self, label, action):
         label = dc(label)
@@ -57,30 +60,46 @@ class EpisodeHistory:
             label[action[0]] = action[1]
         return label.unsqueeze(0)
 
-    def check_loop(self, action):
-
-        new_label = self.perm_label(self.label_perm[-1, :], action)
-        new_label_str = ''.join([str(i.item()) for i in new_label[0]])
-        if new_label_str in self.visited_state:
-            return True
-        else:
-            return False
+    # def check_loop(self, action):
+    #
+    #     new_label = self.perm_label(self.label_perm[-1, :], action)
+    #     new_label_str = ''.join([str(i.item()) for i in new_label[0]])
+    #     if new_label_str in self.visited_state:
+    #         return True
+    #     else:
+    #         return False
 
     def write(self, action, action_idx, reward):
 
+
         new_label = self.perm_label(self.label_perm[-1, :], action)
-        new_label_str = ''.join([str(i.item()) for i in new_label[0]])
-        self.visited_state.add(new_label_str)
+
+        # new_label_str = ''.join([str(i.item()) for i in new_label[0]])
+        # self.visited_state.add(new_label_str)
         self.action_seq.append(action)
+
         self.action_indices.append(action_idx)
+
         self.reward_seq.append(reward)
+
+        self.current_gain += reward
+
+        self.calib_reward_seq.append(max(self.best_gain_sofar, self.current_gain) - self.best_gain_sofar)
+
+        # print('best gain previous:', self.best_gain_sofar)
+        # print('current gain:', self.current_gain)
+        self.best_gain_sofar = max(self.best_gain_sofar, self.current_gain)
+        # print('renewed best gain:', self.best_gain_sofar)
+        # print(reward, self.current_gain, self.best_gain_sofar)
+
         self.label_perm = torch.cat([self.label_perm, new_label], dim=0)
-        self.node_visit_cnt[action[0]] += 1
-        self.node_visit_cnt[action[1]] += 1
+        # self.node_visit_cnt[action[0]] += 1
+        # self.node_visit_cnt[action[1]] += 1
         self.episode_len += 1
 
     def wrap(self):
         self.reward_seq = torch.tensor(self.reward_seq)
+        self.calib_reward_seq = torch.tensor(self.calib_reward_seq)
         self.label_perm = self.label_perm.long()
 
 
@@ -141,7 +160,7 @@ def weight_monitor(model, model_target):
 
 
 class DQN:
-    def __init__(self, problem, action_type='swap', gamma=1.0, eps=0.1, lr=1e-4, replay_buffer_max_size=10, extended_h=False, time_aware=False, use_x=True, cuda_flag=True):
+    def __init__(self, problem, action_type='swap', gamma=1.0, eps=0.1, lr=1e-4, replay_buffer_max_size=10, extended_h=False, time_aware=False, use_x=True, clip_target=False, use_calib_reward=False, cuda_flag=True):
 
         self.problem = problem
         self.action_type = action_type
@@ -154,6 +173,8 @@ class DQN:
         self.eps = eps  # constant for exploration in dqn
         self.extended_h = extended_h
         self.use_x = use_x
+        self.clip_target = clip_target
+        self.use_calib_reward = use_calib_reward
         if cuda_flag:
             self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim, extended_h=self.extended_h, use_x=self.use_x).cuda()
         else:
@@ -241,7 +262,7 @@ class DQN:
 
             state, reward = self.problem.step((swap_i, swap_j), action_type=action_type)
 
-            ep.write(action=(swap_i, swap_j), action_idx=best_action, reward=reward.unsqueeze(0))
+            ep.write(action=(swap_i, swap_j), action_idx=best_action, reward=reward.item())
 
             sum_r += reward
 
@@ -315,7 +336,8 @@ class DQN:
             R = [state_reward[1].unsqueeze(0) for state_reward in state_reward_tuples]
             sum_r += sum(R)
 
-            [ep[k].write(action=swap_ij[k, :], action_idx=best_actions[k]-action_mask[k], reward=R[k]) for k in range(batch_size)]
+            # print(R[0].squeeze(0).item())
+            [ep[k].write(action=swap_ij[k, :], action_idx=best_actions[k]-action_mask[k], reward=R[k].item()) for k in range(batch_size)]
 
             t += 1
 
@@ -351,8 +373,10 @@ class DQN:
 
             action_idx = self.experience_replay_buffer[episode_i].action_indices[step_j]
             action_indices.append(action_idx)
-
-            r = self.experience_replay_buffer[episode_i].reward_seq[step_j: step_j + q_step]
+            if self.use_calib_reward:
+                r = self.experience_replay_buffer[episode_i].calib_reward_seq[step_j: step_j + q_step]
+            else:
+                r = self.experience_replay_buffer[episode_i].reward_seq[step_j: step_j + q_step]
             r = torch.sum(r * torch.tensor([self.gamma ** i for i in range(q_step)]))
             R.append(r.unsqueeze(0))
 
@@ -402,6 +426,8 @@ class DQN:
             # only compute limited number for Q_s1a
             _, _, _, Q_s1a_ = self.model(batch_begin_state, batch_begin_action[begin_action_list], action_type=self.action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-step_j-1)
             _, _, _, Q_s2a = self.model_target(batch_end_state, batch_end_action, action_type=self.action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-step_j-1-q_step)
+            if self.clip_target:
+                Q_s2a = F.relu(Q_s2a)
             if self.time_aware and step_j + q_step == episode_len - 1:
                 q = - Q_s1a_
             else:
@@ -410,6 +436,8 @@ class DQN:
             _, _, _, Q_s1a = self.model(batch_begin_state, batch_begin_action, action_type=self.action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-step_j-1)
             max_action_list = action_mask + Q_s1a.view(-1, G_start_actions.shape[0]).argmax(dim=1)
             _, _, _, Q_s2a_ = self.model_target(batch_end_state, batch_end_action[max_action_list], action_type=self.action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-step_j-1-q_step)
+            if self.clip_target:
+                Q_s2a_ = F.relu(Q_s2a_)
             if self.time_aware and step_j + q_step == episode_len - 1:
                 q = - Q_s1a[begin_action_list]
             else:

@@ -31,11 +31,11 @@ def latestModelVersion(file):
 # python run.py --gpu=2 --save_folder=dqn_0110_test_gamma95 --gamma=0.95 --n_epoch=5000 --save_ckpt_step=500
 # python run.py --gpu=1 --save_folder=dqn_0113_test_eps1 --explore_end_at=0.6 --eps=0.1
 # python run.py --gpu=0 --save_folder=dqn_0113_test_eps0 --eps=0.3
-# python run.py --gpu=0 --save_folder=dqn_0116_base
+# python run.py --gpu=3 --save_folder=dqn_0124_calibr
 # args
 parser = argparse.ArgumentParser(description="GNN with RL")
 parser.add_argument('--save_folder', default='test')
-parser.add_argument('--gpu', default='0', help="")
+parser.add_argument('--gpu', default='1', help="")
 parser.add_argument('--resume', default=False)
 parser.add_argument('--action_type', default='swap', help="")
 parser.add_argument('--k', default=3, help="size of K-cut")
@@ -43,7 +43,9 @@ parser.add_argument('--m', default=3, help="cluster size")
 parser.add_argument('--ajr', default=5, help="")
 parser.add_argument('--h', default=16, help="hidden dimension")
 parser.add_argument('--extend_h', default=True)
-parser.add_argument('--use_x', default=1)
+parser.add_argument('--use_x', default=0)
+parser.add_argument('--clip_target', default=0)
+parser.add_argument('--use_calib_reward', default=1)
 parser.add_argument('--time_aware', default=False)
 parser.add_argument('--a', default=1, help="")
 parser.add_argument('--gamma', type=float, default=0.9, help="")
@@ -76,6 +78,8 @@ ajr = int(args['ajr'])
 h = int(args['h'])
 extend_h = bool(args['extend_h'])
 use_x = bool(int(args['use_x']))
+clip_target = bool(int(args['clip_target']))
+use_calib_reward = bool(int(args['use_calib_reward']))
 time_aware = bool(args['time_aware'])
 a = int(args['a'])
 gamma = float(args['gamma'])
@@ -115,6 +119,8 @@ if not resume:
               , extended_h=extend_h
               , time_aware=time_aware
               , use_x=use_x
+              , clip_target=clip_target
+              , use_calib_reward=use_calib_reward
               , cuda_flag=True)
     with open(path + 'dqn_0', 'wb') as model_file:
         pickle.dump(alg, model_file)

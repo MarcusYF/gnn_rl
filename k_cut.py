@@ -356,8 +356,8 @@ class MultiHeadedAttention(nn.Module):
         super(MultiHeadedAttention, self).__init__()
         assert d_model % h == 0
         # d_v=d_k=hid_dim
-        self.d_k = d_model // h
-        self.h = h
+        self.d_k = d_model // h  # 16
+        self.h = h  # 4
         self.linears = self.clones(nn.Linear(d_model, d_model), 4)
         self.attn = None
         self.dropout = nn.Dropout(p=dropout)
@@ -367,9 +367,13 @@ class MultiHeadedAttention(nn.Module):
         return nn.ModuleList([dc(module) for _ in range(N)])
 
     def attention(self, query, key, value, mask=None, dropout=None):
+        # query: (b, h, 1, d)
+        # key, value: (1, h, n, d) 1, h, d, n
         d_k = query.size(-1)
+
         scores = torch.matmul(query, key.transpose(-2, -1)) \
                  / math.sqrt(d_k)
+
         if mask is not None:
             scores = scores.masked_fill(mask == 0, -1e9)
         p_attn = F.softmax(scores, dim=-1)
@@ -378,19 +382,25 @@ class MultiHeadedAttention(nn.Module):
         return torch.matmul(p_attn, value), p_attn
 
     def forward(self, query, key, value, mask=None):
+        # query: (bg, b, 4d)
+        # key, value: (bg, n, 4d)
         if mask is not None:
             # Same mask applied to all h heads.
             mask = mask.unsqueeze(1)
-        nbatches = query.size(0)
+        nbatches_g = query.size(0)
+        nbatches = query.size(1)
         if self.activate_linear:
-            query, = [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2) for l, x in zip(self.linears, (query, ))]
-            key, value = [l(x).view(1, -1, self.h, self.d_k).transpose(1, 2) for l, x in zip(self.linears, (key, value))]
+            query, = [l(x).view(nbatches_g, nbatches, -1, self.h, self.d_k).transpose(2, 3) for l, x in zip(self.linears, (query, ))]
+            key, value = [l(x).view(nbatches_g, 1, -1, self.h, self.d_k).transpose(2, 3) for l, x in zip(self.linears, (key, value))]
         else:
-            query, = [x.view(nbatches, -1, self.h, self.d_k).transpose(1, 2) for l, x in zip(self.linears, (query, ))]
-            key, value = [x.view(1, -1, self.h, self.d_k).transpose(1, 2) for l, x in zip(self.linears, (key, value))]
-        x, self.attn = self.attention(query, key, value, mask=mask,
-                                 dropout=self.dropout)
-        x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
+            query, = [x.view(nbatches_g, nbatches, -1, self.h, self.d_k).transpose(2, 3) for l, x in zip(self.linears, (query, ))]
+            key, value = [x.view(nbatches_g, 1, -1, self.h, self.d_k).transpose(2, 3) for l, x in zip(self.linears, (key, value))]
+
+        # query: (bg, b, h, 1, d)
+        # key, value: (bg, 1, h, n, d)
+
+        x, self.attn = self.attention(query, key, value, mask=mask, dropout=self.dropout)
+        x = x.transpose(2, 3).contiguous().view(nbatches_g, nbatches, -1, self.h * self.d_k)
         if self.activate_linear:
             return self.linears[-1](x)
         else:
@@ -422,6 +432,36 @@ class PositionalEncoding(nn.Module):
 # pe = PositionalEncoding(10, 0, 50)
 # x = torch.tensor([[0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0]])
 # x = pe(x, 1)
+# problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
+# m = DQNet(k=3, m=3, ajr=5, num_head=4, hidden_dim=16, extended_h=True, use_x=False).cuda()
+# #
+# g1 = to_cuda(problem.g)
+# a1 = problem.get_legal_actions()
+# problem.reset()
+# g2 = to_cuda(problem.g)
+# a2 = problem.get_legal_actions()
+# problem.reset()
+# g3 = to_cuda(problem.g)
+# a3 = problem.get_legal_actions()
+# g = dgl.batch([g1,g2,g3])
+# actions = torch.cat([a1,a2,a3], axis=0)
+#
+# S_a_encoding1, h11, h21, Q_sa1 = m.forward_mha(g=dgl.batch([g2]), actions=a2.cuda())
+#
+# S_a_encoding, h1, h2, Q_sa = m.forward_mha(g=g, actions=actions.cuda())
+
+
+#
+# q = torch.rand((2, 76)).repeat(3,1,1).cuda()  #(b, 4h)
+#
+# key = torch.cat([g1.ndata['h'].repeat(1, 1, 4), g2.ndata['h'].repeat(1, 1, 4), g3.ndata['h'].repeat(1, 1, 4)], axis=0) #(n, 4h)
+# value = key  #(n, 4h)
+# t = m.MHA(q, key, value)  #(b, 1, 4h)
+
+# q1 = q[0:2,:,:]
+# key1 = key[0:2,:,:]
+# value1 = value[0:2,:,:]
+# t1 = m.MHA(q1, key1, value1)  #(b, 1, 4h)
 
 
 class DQNet(nn.Module):
@@ -455,8 +495,7 @@ class DQNet(nn.Module):
 
         self.h_residual = []
 
-    def forward(self, g, actions=None, action_type='swap', gnn_step=3, time_aware=False, remain_episode_len=None):
-
+    def forward_vanilla(self, g, actions=None, action_type='swap', gnn_step=3, time_aware=False, remain_episode_len=None):
         if isinstance(g, BatchedDGLGraph):
             batch_size = g.batch_size
             num_action = actions.shape[0] // batch_size
@@ -518,7 +557,7 @@ class DQNet(nn.Module):
 
         return S_a_encoding, h_new, g.ndata['h'], Q_sa
 
-    def forward_mha(self, g, actions=None, action_type='swap', gnn_step=3):
+    def forward(self, g, actions=None, action_type='swap', gnn_step=3, time_aware=False, remain_episode_len=None):
         n = self.n
         k = self.k
         m = self.m
@@ -543,6 +582,7 @@ class DQNet(nn.Module):
         else:
             g.ndata['h'] = h
 
+
         h_new = h
         # pe = PositionalEncoding(h.shape[1], dropout=0, max_len=max_step)
         # g.ndata['h'] = torch.cat([pe(h, remain_step), g.ndata['x'], g.ndata['label']], dim=1)
@@ -551,11 +591,14 @@ class DQNet(nn.Module):
 
         # compute centroid embedding c_i
         # gc_x = torch.mm(g.ndata['x'].t(), g.ndata['label']) / m
-        gc_h = torch.mm(g.ndata['h'].t(), g.ndata['label']) / m
+        # gc_h = torch.mm(g.ndata['h'].t(), g.ndata['label']) / m
+        gc_h = torch.bmm(g.ndata['x'].view(batch_size, n, -1).transpose(1, 2), \
+                         g.ndata['label'].view(batch_size, n, -1)) / m
+        # gc_h: (bg, d, k)
 
+        key = g.ndata['h'].repeat(1, num_head).view(batch_size, n, -1)
+        value = key  #(bg, n, 4d)
 
-        key = g.ndata['h'].repeat(1, num_head)
-        value = g.ndata['h'].repeat(1, num_head)
         # action = (0, 1) # swap - (i, j)
         # # query head: (x_i, x_j, c_i, c_j)
         # head1 = g.ndata['h'][action[0]]
@@ -565,20 +608,25 @@ class DQNet(nn.Module):
         # query = torch.cat([head1, head2, head3, head4], axis=0).unsqueeze(0)
         # query_mirror = torch.cat([head2, head1, head4, head3], axis=0).unsqueeze(0)
 
-        # feed the whole action space
-        Q1 = torch.cat([g.ndata['h'].repeat(1, n).view(n * n, hidden_dim) \
-                           , g.ndata['h'].repeat(n, 1) \
-                           , torch.mm(g.ndata['label'].repeat(1, n).view(n * n, k), gc_h.t()) \
-                           , torch.mm(g.ndata['label'].repeat(n, 1), gc_h.t())]
-                       , axis=1)
+        # feed the whole action space (bg, num_action, 4d)
 
-        Q2 = torch.cat([Q1[:, hidden_dim:hidden_dim * 2]
-                           , Q1[:, 0:hidden_dim]
-                           , Q1[:, hidden_dim * 3:hidden_dim * 4]
-                           , Q1[:, hidden_dim * 2:hidden_dim * 3]]
-                       , axis=1)
+        if isinstance(g, BatchedDGLGraph):
+            action_mask = torch.tensor(range(0, self.n * batch_size, self.n))\
+                .unsqueeze(1).expand(batch_size, 2)\
+                .repeat(1, num_action)\
+                .view(num_action * batch_size, -1)
 
-        S_a_encoding = self.MHA(Q1, key, value) + self.MHA(Q2, key, value)  # (4*h) * 1
+            actions_ = actions + action_mask.cuda()
+        else:
+            actions_ = actions
+        q_h = torch.cat([g.ndata['h'][actions_[:, 0], :], \
+                       g.ndata['h'][actions_[:, 1], :]], axis=1).view(batch_size, num_action, -1)
+
+        q_c = q_h
+
+        Q = torch.cat([q_h, q_c], axis=2)
+
+        S_a_encoding = self.MHA(Q, key, value)# (bg, num_action, 1, 4d)
         # mN = dgl.mean_nodes(g, 'h')
         # PI = self.policy(g.ndata['h'])
         Q_sa = self.value2(F.relu(self.value1(S_a_encoding)))

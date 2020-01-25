@@ -5,7 +5,6 @@ import numpy as np
 import time
 import pickle
 import torch
-from DQN import DQN
 from tqdm import tqdm
 from toy_models.Qiter import vis_g
 from pandas import DataFrame
@@ -19,7 +18,7 @@ from pandas import DataFrame
 
 class test_summary():
 
-    def __init__(self, alg, problem, num_instance=100):
+    def __init__(self, alg, problem, num_instance=100, q_net='mlp'):
         if isinstance(alg, DQN):
             self.alg = alg.model
         else:
@@ -36,6 +35,7 @@ class test_summary():
         self.max_gain_budget = []
         self.max_gain_ratio = []
         self.action_indices = DataFrame(range(27))
+        self.q_net = q_net
 
     # need to adapt from Canonical_solvers.py
     def cmpt_optimal(self):
@@ -57,8 +57,14 @@ class test_summary():
         for i in range(episode_len):
             legal_actions = test_problem.get_legal_actions()
 
-            S_a_encoding, h1, h2, Q_sa = self.alg(dgl.batch([g]), legal_actions.cuda(), gnn_step=gnn_step,
+            if self.q_net == 'mlp':
+                S_a_encoding, h1, h2, Q_sa = self.alg.forward_vanilla(dgl.batch([g]), legal_actions.cuda(), gnn_step=gnn_step,
                                                    time_aware=time_aware, remain_episode_len=episode_len - i - 1)
+            else:
+                S_a_encoding, h1, h2, Q_sa = self.alg.forward(dgl.batch([g]), legal_actions.cuda(),
+                                                                      gnn_step=gnn_step,
+                                                                      time_aware=time_aware,
+                                                                      remain_episode_len=episode_len - i - 1)
             # print(Q_sa)
             # epsilon greedy strategy
             if torch.rand(1) > explore_prob:
@@ -72,7 +78,7 @@ class test_summary():
                 action_idx = torch.randint(high=legal_actions.shape[0], size=(1,)).squeeze()
             swap_i, swap_j = legal_actions[action_idx]
             state, reward = test_problem.step((swap_i, swap_j))
-            ep.write((swap_i, swap_j), action_idx, reward)
+            ep.write((swap_i, swap_j), action_idx, reward.item())
             g = to_cuda(state)
 
         return S, ep
@@ -88,11 +94,11 @@ class test_summary():
             self.episodes.append((ep))
             if criteria == 'max':
                 cum_gain = np.cumsum(ep.reward_seq)
-                self.max_gain.append(max(cum_gain).item())
+                self.max_gain.append(max(cum_gain))
                 self.max_gain_budget.append(1 + np.argmax(cum_gain).item())
                 self.max_gain_ratio.append(self.max_gain[-1] / s)
             else:
-                self.max_gain.append(sum(ep.reward_seq).item())
+                self.max_gain.append(sum(ep.reward_seq))
                 self.max_gain_budget.append(episode_len)
                 self.max_gain_ratio.append(self.max_gain[-1] / s)
 
