@@ -121,15 +121,15 @@ def map_psar2g(psar, hidden_dim=16, rewire_edges=False):
 
 if __name__ == '__main__':
 
-    num_chunks = 10
-    batch_size = 1000
-    bundle_size = 840
+    num_chunks = 1
+    batch_size = 7560
+    bundle_size = 100
 
     dh = data_handler(path='/u/fy4bc/code/research/RL4CombOptm/Data/'
                       , num_chunks=num_chunks
                       , batch_size=batch_size)
     n_record = dh.num_instance * dh.num_action * dh.num_state  # 74844000
-    dh.build_one_pass_index()
+    # dh.build_one_pass_index()
 
     data_object = []
     j = 0
@@ -153,7 +153,12 @@ if __name__ == '__main__':
         data_object.append((batch_state, batch_action, batch_best_action, target_Q, best_Q))
 
         if i % bundle_size == bundle_size - 1:
-            with open('/p/reinforcement/data/gnn_rl/sup_B1000_840_10/batch_' + str(j), 'wb') as dump_file:
+
+            path = '/p/reinforcement/data/gnn_rl/sup_split_100graphs/'
+            if not os.path.exists(path):
+                os.makedirs(path)
+
+            with open(path + 'batch_' + str(j), 'wb') as dump_file:
                 pickle.dump(data_object, dump_file)
             j += 1
             data_object = []

@@ -152,3 +152,54 @@ Avg value of initial S: 4.624367597103119
 Avg max gain: 0.8124199438095093
 Avg percentage max gain: 0.15596737
 Percentage of instances with positive gain: 0.83
+
+
+One graph test: Rotate state/ 3 loss funcs/look at q-value diff. Refactor the test code.
+How can we determine the effectiveness of gnn/q-net?
+
+import timeit
+timeit.timeit('generate_G(k=3, m=3, adjacent_reserve=5, hidden_dim=16)'
+              , setup='from k_cut import generate_G;'
+              , number=100)
+
+timeit.timeit('gg.generate_G()'
+              , setup='from k_cut import GraphGenerator; gg = GraphGenerator(3,3,5)'
+              , number=100)
+
+g1 = generate_G(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
+g1 = g1['g']
+x1 = g1.ndata['x']
+g.edata['d']
+
+g.edata['d']
+g.edata['e_type']
+
+
+gg = GraphGenerator(3,3,5)
+g = gg.generate_G()
+
+problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
+e0 = dc(problem.g.edata['e_type'])
+state, reward = problem.step((0, 2))
+e1 = dc(state.edata['e_type'])
+state, reward = problem.step((0, 2))
+e2 = dc(state.edata['e_type'])
+state, reward = problem.step((0, 2), way=1)
+e3 = dc(state.edata['e_type'])
+state, reward = problem.step((0, 2), way=1)
+e4 = dc(state.edata['e_type'])
+
+
+problem.reset()
+timeit.timeit('gg.generate_G()'
+              , setup='from k_cut import GraphGenerator; gg = GraphGenerator(3,3,5)'
+              , number=100)
+
+timeit.timeit('problem.reset(compute_S=False)'
+              , setup='from k_cut import KCut_DGL; problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)'
+              , number=100)
+
+
+timeit.timeit('problem.step((0,2))'
+              , setup='from k_cut import KCut_DGL; problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)'
+              , number=100)

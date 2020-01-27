@@ -8,15 +8,12 @@ Created on Sat Mar  2 16:30:53 2019
 from DQN import DQN
 from k_cut import *
 import argparse
-import matplotlib.pyplot as plt
 import numpy as np
 import time
-import torch
 import os
 import pickle
 from tqdm import tqdm
 import json
-from toy_models.Qiter import vis_g
 
 def latestModelVersion(file):
     versions = [0]
@@ -31,7 +28,7 @@ def latestModelVersion(file):
 # python run.py --gpu=2 --save_folder=dqn_0110_test_gamma95 --gamma=0.95 --n_epoch=5000 --save_ckpt_step=500
 # python run.py --gpu=1 --save_folder=dqn_0113_test_eps1 --explore_end_at=0.6 --eps=0.1
 # python run.py --gpu=0 --save_folder=dqn_0113_test_eps0 --eps=0.3
-# python run.py --gpu=3 --save_folder=dqn_0124_calibr
+# python run.py --gpu=1 --save_folder=dqn_0124_test_fix_target_0
 # args
 parser = argparse.ArgumentParser(description="GNN with RL")
 parser.add_argument('--save_folder', default='test')
@@ -45,7 +42,7 @@ parser.add_argument('--h', default=16, help="hidden dimension")
 parser.add_argument('--extend_h', default=True)
 parser.add_argument('--use_x', default=0)
 parser.add_argument('--clip_target', default=0)
-parser.add_argument('--use_calib_reward', default=1)
+parser.add_argument('--use_calib_reward', default=0)
 parser.add_argument('--time_aware', default=False)
 parser.add_argument('--a', default=1, help="")
 parser.add_argument('--gamma', type=float, default=0.9, help="")
@@ -164,7 +161,7 @@ def run_dqn(alg):
 
         T1 = time.time()
         # TODO memory usage :: episode_len * num_episodes * hidden_dim
-        log = alg.train_dqn(sample_batch_episode=sample_batch_episode, batch_size=batch_size, grad_accum=grad_accum, num_episodes=n_episode, episode_len=episode_len, gnn_step=gnn_step, q_step=q_step, ddqn=ddqn)
+        log = alg.train_dqn(epoch=i, sample_batch_episode=sample_batch_episode, batch_size=batch_size, grad_accum=grad_accum, num_episodes=n_episode, episode_len=episode_len, gnn_step=gnn_step, q_step=q_step, ddqn=ddqn)
         if i % target_update_step == target_update_step - 1:
             alg.update_target_net()
         T2 = time.time()

@@ -51,7 +51,7 @@ class test_summary():
             test_problem = self.problem
         else:
             test_problem = dc(problem)
-        S = test_problem.calc_S()
+        S = test_problem.calc_S().cpu()
         g = to_cuda(test_problem.g)
         ep = EpisodeHistory(g, max_episode_len=episode_len)
         for i in range(episode_len):

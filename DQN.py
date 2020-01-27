@@ -40,7 +40,8 @@ class EpisodeHistory:
         self.action_seq = []
         self.action_indices = []
         self.reward_seq = []
-        self.calib_reward_seq = []
+        self.empl_reward_seq = []
+        # self.calib_reward_seq = []
         if self.action_type == 'swap':
             self.label_perm = torch.tensor(range(self.n)).unsqueeze(0)
         if self.action_type == 'flip':
@@ -82,13 +83,15 @@ class EpisodeHistory:
 
         self.reward_seq.append(reward)
 
-        self.current_gain += reward
+        self.empl_reward_seq.append(reward * 10 - 1)
 
-        self.calib_reward_seq.append(max(self.best_gain_sofar, self.current_gain) - self.best_gain_sofar)
+        # self.current_gain += reward
+
+        # self.calib_reward_seq.append(max(self.best_gain_sofar, self.current_gain) - self.best_gain_sofar)
 
         # print('best gain previous:', self.best_gain_sofar)
         # print('current gain:', self.current_gain)
-        self.best_gain_sofar = max(self.best_gain_sofar, self.current_gain)
+        # self.best_gain_sofar = max(self.best_gain_sofar, self.current_gain)
         # print('renewed best gain:', self.best_gain_sofar)
         # print(reward, self.current_gain, self.best_gain_sofar)
 
@@ -99,7 +102,8 @@ class EpisodeHistory:
 
     def wrap(self):
         self.reward_seq = torch.tensor(self.reward_seq)
-        self.calib_reward_seq = torch.tensor(self.calib_reward_seq)
+        self.empl_reward_seq = torch.tensor(self.empl_reward_seq)
+        # self.calib_reward_seq = torch.tensor(self.calib_reward_seq)
         self.label_perm = self.label_perm.long()
 
 
@@ -351,7 +355,7 @@ class DQN:
 
         return R, tot_return
 
-    def sample_from_buffer(self, batch_size, q_step, gnn_step, episode_len, ddqn):
+    def sample_from_buffer(self, epoch, batch_size, q_step, gnn_step, episode_len, ddqn):
 
         flat_ep_i = [(x[0], y) for x in zip(range(len(self.buffer_indices)), self.buffer_indices) for y in x[1][:-q_step]]
         # sample #batch_size indices in replay buffer
@@ -374,7 +378,8 @@ class DQN:
             action_idx = self.experience_replay_buffer[episode_i].action_indices[step_j]
             action_indices.append(action_idx)
             if self.use_calib_reward:
-                r = self.experience_replay_buffer[episode_i].calib_reward_seq[step_j: step_j + q_step]
+                # r = self.experience_replay_buffer[episode_i].calib_reward_seq[step_j: step_j + q_step]
+                r = self.experience_replay_buffer[episode_i].empl_reward_seq[step_j: step_j + q_step]
             else:
                 r = self.experience_replay_buffer[episode_i].reward_seq[step_j: step_j + q_step]
             r = torch.sum(r * torch.tensor([self.gamma ** i for i in range(q_step)]))
@@ -425,13 +430,18 @@ class DQN:
         if not ddqn:
             # only compute limited number for Q_s1a
             _, _, _, Q_s1a_ = self.model(batch_begin_state, batch_begin_action[begin_action_list], action_type=self.action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-step_j-1)
-            _, _, _, Q_s2a = self.model_target(batch_end_state, batch_end_action, action_type=self.action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-step_j-1-q_step)
-            if self.clip_target:
-                Q_s2a = F.relu(Q_s2a)
-            if self.time_aware and step_j + q_step == episode_len - 1:
+
+            if epoch < 500:
                 q = - Q_s1a_
             else:
-                q = self.gamma ** q_step * Q_s2a.view(-1, G_start_actions.shape[0]).max(dim=1).values - Q_s1a_
+                _, _, _, Q_s2a = self.model_target(batch_end_state, batch_end_action, action_type=self.action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-step_j-1-q_step)
+                # Q_s2a = Q_s2a.detach()
+                if self.clip_target:
+                    Q_s2a = F.relu(Q_s2a)
+                if self.time_aware and step_j + q_step == episode_len - 1:
+                    q = - Q_s1a_
+                else:
+                    q = self.gamma ** q_step * Q_s2a.view(-1, G_start_actions.shape[0]).max(dim=1).values - Q_s1a_
         else:
             _, _, _, Q_s1a = self.model(batch_begin_state, batch_begin_action, action_type=self.action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-step_j-1)
             max_action_list = action_mask + Q_s1a.view(-1, G_start_actions.shape[0]).argmax(dim=1)
@@ -526,7 +536,7 @@ class DQN:
             self.Q_err = 0
             self.log.add_item('entropy', 0)
 
-    def train_dqn(self, sample_batch_episode=True, batch_size=16, grad_accum=10, num_episodes=10, episode_len=50, gnn_step=10, q_step=1, ddqn=False):
+    def train_dqn(self, epoch=0, sample_batch_episode=True, batch_size=16, grad_accum=10, num_episodes=10, episode_len=50, gnn_step=10, q_step=1, ddqn=False):
         """
         :param batch_size:
         :param num_episodes:
@@ -552,7 +562,7 @@ class DQN:
 
         for i in range(grad_accum):
             # 2s
-            R, Q = self.sample_from_buffer(batch_size=batch_size, q_step=q_step, gnn_step=gnn_step, episode_len=episode_len, ddqn=ddqn)
+            R, Q = self.sample_from_buffer(epoch=epoch, batch_size=batch_size, q_step=q_step, gnn_step=gnn_step, episode_len=episode_len, ddqn=ddqn)
             # 0.5s
             self.back_loss(R, Q, update_model=(i % grad_accum == grad_accum - 1))
             del R, Q

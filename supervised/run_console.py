@@ -49,7 +49,7 @@ for i in tqdm(range(n_epoch)):
     outer_i = i // bundle_size
 
     if inner_i == 0:
-        with open('/net/bigtemp/fy4bc/Data/gnn_rl/sup_B1000/batch_' + str(outer_i), 'rb') as m:
+        with open('/p/reinforcement/data/gnn_rl/sup_split_100graphs/batch_' + str(outer_i), 'rb') as m:
             data_bundle = pickle.load(m)
 
     if i % save_ckpt_step == save_ckpt_step - 1:
@@ -60,17 +60,6 @@ for i in tqdm(range(n_epoch)):
 
 
     T1 = time.time()
-
-    # current_batch = dh.sample_batch(batch_idx=i)
-    #
-    # batch_state = dgl.batch([map_psar2g(psaq) for psaq in current_batch])
-    #
-    # batch_action = [torch.tensor(psaq.a).unsqueeze(0) for psaq in current_batch]
-    # batch_action = torch.cat(batch_action, axis=0).cuda()
-    # if loss_fc == 'pairwise':
-    #     batch_best_action = [torch.tensor(psaq.best_a).unsqueeze(0) for psaq in current_batch]
-    #     batch_best_action = torch.cat(batch_best_action, axis=0).cuda()
-    #     batch_action = torch.cat([batch_action, batch_best_action], axis=1).view(-1, 2).cuda()
 
     batch_state = data_bundle[inner_i][0]
     batch_action = data_bundle[inner_i][1].cuda()
@@ -85,9 +74,6 @@ for i in tqdm(range(n_epoch)):
         best_Q = Q_sa[1::2]
         L = F.relu(target_Q - best_Q)
     else:
-        # target_Q = torch.tensor([psaq.q for psaq in current_batch]).cuda()
-        # assign different weight to different target q-values
-        # best_Q = torch.tensor([psaq.best_q for psaq in current_batch]).cuda()
         L = torch.pow(Q_sa - target_Q, 2) / (0.1 + best_Q - target_Q) \
          + 1.6 * F.relu(Q_sa - best_Q)
 

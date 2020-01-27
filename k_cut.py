@@ -9,91 +9,139 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-def generate_G(k, m, adjacent_reserve, hidden_dim, random_sample_node=True, x=None, random_init_label=True, label=None, a=1):
 
-    # init graph
-    g = dgl.DGLGraph()
-    g.add_nodes(k*m)
+class GraphGenerator:
 
-    # 2-d coordinates 'x'
-    if random_sample_node:
-        g.ndata['x'] = torch.rand((k * m, 2))
-    else:
-        g.ndata['x'] = x
-        # g.ndata['x'] = torch.tensor(
-        #     [[0, 0], [0, 1], [1, 0], [1, 1], [0.7, 0.8], [1.5, 1.5], [1.5, 3], [3, 3], [3, 1.5], [1.8, 1.7], [1.8, 0.3],
-        #      [1.8, 0.8], [2.3, 0.8], [2.3, 0.3], [2.1, 0.5]])
+    def __init__(self, k, m, ajr):
 
-    if random_init_label:
-        label = torch.tensor(range(k)).unsqueeze(1).expand(k, m).flatten()
-        label = label[torch.randperm(k * m)]
-    else:
-        label = torch.tensor(label)
+        self.k = k
+        self.m = m
+        self.n = k * m
+        self.ajr = ajr
+        self.nonzero_idx = [i for i in range(self.n**2) if i % (self.n+1) != 0]
+        self.src = [i // self.n for i in self.nonzero_idx]
+        self.dst = [i % self.n for i in self.nonzero_idx]
+        self.adj_mask = torch.tensor(range(0, self.n ** 2, self.n)).unsqueeze(1).expand(self.n, ajr + 1)
 
-    g.ndata['label'] = torch.nn.functional.one_hot(label, k).float()
+    def generate_G(self, x=None, label=None, a=1):
 
-    # store the dist-matrix
-    for i in range(g.number_of_nodes()):
-        v = g.nodes[i]
-        v_x = v.data['x']
-        v_label = v.data['label']
+        # init graph
+        k = self.k
+        m = self.m
+        n = self.n
+        g = dgl.DGLGraph()
 
-        # find the top-k nearest neighbors of v
-        neighbor_dict = {}
-        for j in range(g.number_of_nodes()):
-            if j != i:
-                u = g.nodes[j]
-                u_x = u.data['x']
-                d = torch.cdist(v_x, u_x)
-                # form a complete graph
-                g.add_edges(i, j)
-                g.edges[i, j].data['d'] = d
-                g.edges[i, j].data['w'] = 1 / (1 + torch.exp(a * d))
-                g.edges[i, j].data['e_type'] = torch.zeros((1, 2))
-                neighbor_dict[j] = d
+        g.add_nodes(n)
 
-        neighbor_dist = sorted(neighbor_dict.items(), key=lambda x: x[1], reverse=True)
-        nearest_neighbors = [x[0] for x in neighbor_dist[k * m - 1 - adjacent_reserve:]]
+        # 2-d coordinates 'x'
+        if x is None:
+            g.ndata['x'] = torch.rand((n, 2))
+        else:
+            g.ndata['x'] = x
 
-        # add edges
-        for j in range(g.number_of_nodes()):
-            if j != i:
-                u_label = g.nodes[j].data['label']
-                if j in nearest_neighbors:
-                    # add neighbors
-                    g.edges[i, j].data['e_type'] += torch.tensor([[1, 0]])
-                if torch.max(u_label-v_label).numpy() == 0:
-                    # add group members
-                    g.edges[i, j].data['e_type'] += torch.tensor([[0, 1]])
+        if label is None:
+            label = torch.tensor(range(k)).unsqueeze(1).expand(k, m).flatten()
+            label = label[torch.randperm(n)]
+        else:
+            label = torch.tensor(label)
 
-    # init node embedding h
-    g.ndata['h'] = torch.zeros((g.number_of_nodes(), hidden_dim))
+        g.ndata['label'] = torch.nn.functional.one_hot(label, k).float()
 
-    G = {'g': g, 'k': k, 'm': m, 'adjacent_reserve': adjacent_reserve, 'hidden_dim': hidden_dim, 'a': a}
-    return G
+        _, neighbor_idx, dist_matrix = dgl.transform.knn_graph(g.ndata['x'], self.ajr + 1, extend_info=True)
+
+        g.add_edges(self.src, self.dst)
+        g.edata['d'] = torch.sqrt(dist_matrix[0].view(-1, 1)[self.nonzero_idx, :])
+        g.edata['w'] = 1.0 / (1.0 + torch.exp(a * g.edata['d']))
+
+        adjacent_matrix = torch.zeros((n * n, 1))
+        adjacent_matrix[neighbor_idx[0] + self.adj_mask] = 1
+
+        group_matrix = torch.mm(g.ndata['label'], g.ndata['label'].t()).view(-1, 1)
+
+        g.edata['e_type'] = torch.cat([adjacent_matrix[self.nonzero_idx, :], group_matrix[self.nonzero_idx, :]], dim=1)
+
+        # init node embedding h
+        # g.ndata['h'] = torch.zeros((g.number_of_nodes(), hidden_dim))
+
+        return g
+
+# def generate_G(k, m, adjacent_reserve, hidden_dim, random_sample_node=True, x=None, random_init_label=True, label=None, a=1):
+#
+#     # init graph
+#     g = dgl.DGLGraph()
+#     g.add_nodes(k*m)
+#
+#     # 2-d coordinates 'x'
+#     if random_sample_node:
+#         g.ndata['x'] = torch.rand((k * m, 2))
+#     else:
+#         g.ndata['x'] = x
+#         # g.ndata['x'] = torch.tensor(
+#         #     [[0, 0], [0, 1], [1, 0], [1, 1], [0.7, 0.8], [1.5, 1.5], [1.5, 3], [3, 3], [3, 1.5], [1.8, 1.7], [1.8, 0.3],
+#         #      [1.8, 0.8], [2.3, 0.8], [2.3, 0.3], [2.1, 0.5]])
+#
+#     if random_init_label:
+#         label = torch.tensor(range(k)).unsqueeze(1).expand(k, m).flatten()
+#         label = label[torch.randperm(k * m)]
+#     else:
+#         label = torch.tensor(label)
+#
+#     g.ndata['label'] = torch.nn.functional.one_hot(label, k).float()
+#
+#     # store the dist-matrix
+#     for i in range(g.number_of_nodes()):
+#         v = g.nodes[i]
+#         v_x = v.data['x']
+#         v_label = v.data['label']
+#
+#         # find the top-k nearest neighbors of v
+#         neighbor_dict = {}
+#         for j in range(g.number_of_nodes()):
+#             if j != i:
+#                 u = g.nodes[j]
+#                 u_x = u.data['x']
+#                 d = torch.cdist(v_x, u_x)
+#                 # form a complete graph
+#                 g.add_edges(i, j)
+#                 g.edges[i, j].data['d'] = d
+#                 g.edges[i, j].data['w'] = 1 / (1 + torch.exp(a * d))
+#                 g.edges[i, j].data['e_type'] = torch.zeros((1, 2))
+#                 neighbor_dict[j] = d
+#
+#         neighbor_dist = sorted(neighbor_dict.items(), key=lambda x: x[1], reverse=True)
+#         nearest_neighbors = [x[0] for x in neighbor_dist[k * m - 1 - adjacent_reserve:]]
+#
+#         # add edges
+#         for j in range(g.number_of_nodes()):
+#             if j != i:
+#                 u_label = g.nodes[j].data['label']
+#                 if j in nearest_neighbors:
+#                     # add neighbors
+#                     g.edges[i, j].data['e_type'] += torch.tensor([[1, 0]])
+#                 if torch.max(u_label-v_label).numpy() == 0:
+#                     # add group members
+#                     g.edges[i, j].data['e_type'] += torch.tensor([[0, 1]])
+#
+#     # init node embedding h
+#     g.ndata['h'] = torch.zeros((g.number_of_nodes(), hidden_dim))
+#
+#     return g
 
 
-class KCut_DGL():
+class KCut_DGL:
 
-    def __init__(self, k, m, adjacent_reserve, hidden_dim, random_sample_node=True, x=None, random_init_label=True, label=None, a=1):
-        self.g = generate_G(k, m, adjacent_reserve, hidden_dim
-                            , random_sample_node=random_sample_node, x=x
-                            , random_init_label=random_init_label, label=label
-                            , a=a)['g']
+    def __init__(self, k, m, adjacent_reserve, hidden_dim, x=None, label=None, a=1):
+        self.graph_generator = GraphGenerator(k=k, m=m, ajr=adjacent_reserve)
+        self.g = self.graph_generator.generate_G(x=x, label=label, a=a)
         self.N = k * m
-        self.k = k # num of clusters
-        self.m = m # num of nodes in cluster
+        self.k = k  # num of clusters
+        self.m = m  # num of nodes in cluster
         self.adjacent_reserve = adjacent_reserve
         self.hidden_dim = hidden_dim
-        self.random_sample_node = random_sample_node
         self.x = x
-        self.random_init_label = random_init_label
         self.label = label
         self.a = a
         self.S = self.calc_S()
-
-    def get_graph_dims(self):
-        return 2
 
     def calc_S(self, g=None):
         if g is None:
@@ -110,10 +158,10 @@ class KCut_DGL():
         return S/2
 
     def gen_batch_graph(self, batch_size):
-        return [generate_G(self.k, self.m, self.adjacent_reserve, self.hidden_dim, random_sample_node=self.random_sample_node, x=self.x, random_init_label=self.random_init_label, label=self.label, a=self.a)['g'] for i in range(batch_size)]
+        return [self.graph_generator.generate_G(x=self.x, label=self.label, a=self.a) for i in range(batch_size)]
 
     def reset(self, compute_S=True):
-        self.g = generate_G(self.k, self.m, self.adjacent_reserve, self.hidden_dim, random_sample_node=self.random_sample_node, x=self.x, random_init_label=self.random_init_label, label=self.label, a=self.a)['g']
+        self.g = self.graph_generator.generate_G(x=self.x, label=self.label, a=self.a)
         if compute_S:
             self.S = self.calc_S()
         return self.g
@@ -183,20 +231,20 @@ class KCut_DGL():
             if i == j or i_label == j_label:
                 return state, torch.tensor(.0)
 
-            # rewire edges
-            if rewire_edges:
-                group_i = (state.ndata['label'][:, i_label] > .5).nonzero().squeeze()
-                group_j = (state.ndata['label'][:, j_label] > .5).nonzero().squeeze()
-                state.edges[i, group_i].data['e_type'] -= torch.tensor([[0, 1]]).repeat(self.m - 1, 1)
-                state.edges[group_i, i].data['e_type'] -= torch.tensor([[0, 1]]).repeat(self.m - 1, 1)
-                state.edges[i, group_j].data['e_type'] += torch.tensor([[0, 1]]).repeat(self.m, 1)
-                state.edges[group_j, i].data['e_type'] += torch.tensor([[0, 1]]).repeat(self.m, 1)
-                state.edges[j, group_j].data['e_type'] -= torch.tensor([[0, 1]]).repeat(self.m - 1, 1)
-                state.edges[group_j, j].data['e_type'] -= torch.tensor([[0, 1]]).repeat(self.m - 1, 1)
-                state.edges[j, group_i].data['e_type'] += torch.tensor([[0, 1]]).repeat(self.m, 1)
-                state.edges[group_i, j].data['e_type'] += torch.tensor([[0, 1]]).repeat(self.m, 1)
-                state.edges[j, i].data['e_type'] -= torch.tensor([[0, 2]])
-                state.edges[i, j].data['e_type'] -= torch.tensor([[0, 2]])
+
+            # if rewire_edges:
+            #     group_i = (state.ndata['label'][:, i_label] > .5).nonzero().squeeze()
+            #     group_j = (state.ndata['label'][:, j_label] > .5).nonzero().squeeze()
+            #     state.edges[i, group_i].data['e_type'] -= torch.tensor([[0, 1]]).repeat(self.m - 1, 1)
+            #     state.edges[group_i, i].data['e_type'] -= torch.tensor([[0, 1]]).repeat(self.m - 1, 1)
+            #     state.edges[i, group_j].data['e_type'] += torch.tensor([[0, 1]]).repeat(self.m, 1)
+            #     state.edges[group_j, i].data['e_type'] += torch.tensor([[0, 1]]).repeat(self.m, 1)
+            #     state.edges[j, group_j].data['e_type'] -= torch.tensor([[0, 1]]).repeat(self.m - 1, 1)
+            #     state.edges[group_j, j].data['e_type'] -= torch.tensor([[0, 1]]).repeat(self.m - 1, 1)
+            #     state.edges[j, group_i].data['e_type'] += torch.tensor([[0, 1]]).repeat(self.m, 1)
+            #     state.edges[group_i, j].data['e_type'] += torch.tensor([[0, 1]]).repeat(self.m, 1)
+            #     state.edges[j, i].data['e_type'] -= torch.tensor([[0, 2]])
+            #     state.edges[i, j].data['e_type'] -= torch.tensor([[0, 2]])
 
             # compute reward
             old_0, old_1 = self.calc_swap_delta(i, j, i_label, j_label, state)
@@ -205,6 +253,11 @@ class KCut_DGL():
             tmp = dc(state.nodes[i].data['label'])
             state.nodes[i].data['label'] = state.nodes[j].data['label']
             state.nodes[j].data['label'] = tmp
+
+            # rewire edges
+            if rewire_edges:
+                state.edata['e_type'][:, 1] = torch.mm(state.ndata['label'], state.ndata['label'].t()).view(-1)[
+                    self.graph_generator.nonzero_idx]
 
             new_0, new_1 = self.calc_swap_delta(i, j, j_label, i_label, state)
             reward = torch.sqrt(torch.sum(torch.pow(torch.cat([old_0, old_1]), 2), axis=1)).sum()\
@@ -494,6 +547,7 @@ class DQNet(nn.Module):
         self.t8 = nn.Linear(self.hidden_dim + self.k, self.hidden_dim)
 
         self.h_residual = []
+        self.info = ''
 
     def forward_vanilla(self, g, actions=None, action_type='swap', gnn_step=3, time_aware=False, remain_episode_len=None):
         if isinstance(g, BatchedDGLGraph):
@@ -503,7 +557,11 @@ class DQNet(nn.Module):
             num_action = actions.shape[0]
 
 
-        h = g.ndata['h']
+        # h = g.ndata['h']
+        if self.extended_h:
+            h = torch.zeros((g.ndata['h'].shape[0], self.hidden_dim - self.k)).cuda()
+        else:
+            h = torch.zeros((g.ndata['h'].shape[0], self.hidden_dim)).cuda()
 
         # if in time-aware mode
         if time_aware:
