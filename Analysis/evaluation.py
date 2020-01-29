@@ -11,22 +11,27 @@ from tqdm import tqdm
 from toy_models.Qiter import vis_g
 from Analysis.episode_stats import test_summary
 
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+
 # folder = 'Models/dqn_0113_test_qstep/'
 # folder = 'Models/dqn_test_not_sample_batch_episode/'
-folder = '/u/fy4bc/code/research/RL4CombOptm' + '/Models/dqn_0124_calibr/'
+# folder = '/u/fy4bc/code/research/RL4CombOptm' + '/Models/dqn_0129_base/'
+folder = '/p/reinforcement/data/gnn_rl/model/dqn/' + 'dqn_5by6_0129_base' + '/'
+# folder = '/p/reinforcement/data/gnn_rl/model/dqn/' + 'dqn_10by10_0129_base' + '/'
 # folder = 'Models/dqn_0113_test_eps0/'
 # folder = 'Models/dqn_test_centroid_h16/'
-with open(folder + 'dqn_' + str(9000), 'rb') as model_file:
+with open(folder + 'dqn_' + str(3000), 'rb') as model_file:
     alg = pickle.load(model_file)
 
 x = []
-for i in range(alg.experience_replay_buffer.__len__()):
-    x.append(sum(alg.experience_replay_buffer[i].reward_seq))
-sum(x)
+for i in tqdm(range(alg.experience_replay_buffer2.__len__())):
+    # x.append(sum(alg.experience_replay_buffer[i].reward_seq))
+    x.append(alg.experience_replay_buffer2[0].r.item())
+sum(x) / alg.experience_replay_buffer2.__len__()
 
-problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)
-test = test_summary(alg=alg, problem=problem, num_instance=100)
-test.run_test(episode_len=50, explore_prob=.0, time_aware=False, softmax_constant=1e10)
+problem = KCut_DGL(k=5, m=6, adjacent_reserve=10, hidden_dim=32, sample_episode=200)
+test = test_summary(alg=alg, problem=problem, q_net='mlp')
+test.run_test(batch_size=200, gnn_step=3, episode_len=50, explore_prob=0.0)
 test.show_result()
 # scp -r /u/fy4bc/code/research/RL4CombOptm/gnn_rl/Models/dqn_0113_test_eps0 fy4bc@128.143.69.125:/home/fy4bc/mnt/code/research/RL4CombOptm/MinimumVertexCover_DRL/Models/
 
@@ -42,20 +47,20 @@ test.show_result()
 
 
 # plot Q-loss/Reward curve
-fig_name = 'return-base-15'
+fig_name = 'return-base-21'
 
 ret = alg.log.get_log("tot_return")
 qv = alg.log.get_log("Q_error")
 x = []
 for i in range(len(qv)):
-    if i*10+100<=len(ret):
-        x.append(np.mean(ret[i*10:i*10+100]))
+    if i*1+100<=len(ret):
+        x.append(np.mean(ret[i*1:i*1+100]))
 
 fig = plt.figure(figsize=[15, 5])
 ax = fig.add_subplot(121)
 ax.plot(x, label='episode reward')
 ax2 = ax.twinx()
-eps = np.concatenate([np.linspace(0.5, 0.1, 4000), np.ones(len(qv)-4000)*0.1]) #
+eps = np.concatenate([np.linspace(0.5, 0.1, 5000), np.ones(len(qv)-5000)*0.1]) #
 # eps = np.linspace(0.9, 0.1, 1000)
 ax2.plot(eps, label='\epsilon-greedy exploration prob.', color='r')
 # fig.legend(loc=1)
@@ -72,7 +77,7 @@ ax.set_xlabel('Training Epochs')
 ax.set_ylabel("Qradratic Q-loss ")
 ax2.set_ylabel("Exploration Probability")
 ax.set_title('Training Loss')
-plt.savefig('./Analysis/' + fig_name + '.png')
+plt.savefig('./Analysis/figs/' + fig_name + '.png')
 plt.close()
 
 ## plot test performance curve

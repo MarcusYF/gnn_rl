@@ -8,33 +8,31 @@ import torch
 from tqdm import tqdm
 from toy_models.Qiter import vis_g
 from pandas import DataFrame
+import dgl
 
-# Avg value of initial S: 4.718478097915649
-# Avg max gain: 0.821259241104126
-# Avg max gain budget: 50.0
-# Var max gain budget: 0.0
-# Avg percentage max gain: 0.16542086
-# Percentage of instances with positive gain: 0.81
 
-class test_summary():
+class test_summary:
 
-    def __init__(self, alg, problem, num_instance=100, q_net='mlp'):
+    def __init__(self, alg, problem=None, q_net='mlp'):
         if isinstance(alg, DQN):
             self.alg = alg.model
         else:
             self.alg = alg
-        if isinstance(problem, list):
-            self.retain_test = True
-        else:
-            self.retain_test = False
+
         self.problem = problem
-        self.num_instance = num_instance
+        # if isinstance(problem, BatchedDGLGraph):
+        #     self.problem = problem
+        # elif isinstance(problem, list):
+        #     self.problem = dgl.batch(problem)
+        # else:
+        #     self.problem = False
+
         self.episodes = []
         self.S = []
         self.max_gain = []
         self.max_gain_budget = []
         self.max_gain_ratio = []
-        self.action_indices = DataFrame(range(27))
+        # self.action_indices = DataFrame(range(27))
         self.q_net = q_net
 
     # need to adapt from Canonical_solvers.py
@@ -45,71 +43,98 @@ class test_summary():
     def test_greedy(self):
         return
 
-    def test_model(self, problem=None, gnn_step=3, episode_len=50, explore_prob=0.1, time_aware=False, softmax_constant=1.0):
+    def run_test(self, problem=None, batch_size=100, gnn_step=3, episode_len=50, explore_prob=0.1, softmax_constant=1.0):
+        self.num_actions = self.problem.N * (self.problem.N - self.problem.m) // 2
         if problem is None:
-            self.problem.reset()
+            self.batch_size = batch_size
+            self.bg = to_cuda(self.problem.gen_batch_graph(batch_size=batch_size))
+            gl = dgl.unbatch(self.bg)
             test_problem = self.problem
         else:
-            test_problem = dc(problem)
-        S = test_problem.calc_S().cpu()
-        g = to_cuda(test_problem.g)
-        ep = EpisodeHistory(g, max_episode_len=episode_len)
-        for i in range(episode_len):
-            legal_actions = test_problem.get_legal_actions()
+            # unit test
+            batch_size = 1
+            self.batch_size = batch_size
+            self.bg = dgl.batch([problem.g])
+            gl = dgl.unbatch(self.bg)
+            self.problem = dc(problem)
+            test_problem = self.problem
+
+        self.action_mask = torch.tensor(range(0, self.num_actions * batch_size, self.num_actions)).cuda()
+
+        self.S = [test_problem.calc_S(g=gl[i]).cpu() for i in range(batch_size)]
+
+        ep = [EpisodeHistory(gl[i], max_episode_len=episode_len, action_type='swap') for i in range(batch_size)]
+
+        for i in tqdm(range(episode_len)):
+            batch_legal_actions = test_problem.get_legal_actions(state=self.bg, action_type='swap').cuda()
 
             if self.q_net == 'mlp':
-                S_a_encoding, h1, h2, Q_sa = self.alg.forward_vanilla(dgl.batch([g]), legal_actions.cuda(), gnn_step=gnn_step,
-                                                   time_aware=time_aware, remain_episode_len=episode_len - i - 1)
+                S_a_encoding, h1, h2, Q_sa = self.alg.forward(self.bg, batch_legal_actions, gnn_step=gnn_step)
             else:
-                S_a_encoding, h1, h2, Q_sa = self.alg.forward(dgl.batch([g]), legal_actions.cuda(),
-                                                                      gnn_step=gnn_step,
-                                                                      time_aware=time_aware,
-                                                                      remain_episode_len=episode_len - i - 1)
-            # print(Q_sa)
-            # epsilon greedy strategy
-            if torch.rand(1) > explore_prob:
-                # action_idx1 = Q_sa.argmax()
-                weight = torch.softmax(softmax_constant * Q_sa.detach().cpu(), dim=0)
-                # print(max(weight))
-                action_idx = self.action_indices.sample(n=1, weights=weight).values[0][0]
-                # print('111', action_idx1)
-                # print('222', action_idx)
-            else:
-                action_idx = torch.randint(high=legal_actions.shape[0], size=(1,)).squeeze()
-            swap_i, swap_j = legal_actions[action_idx]
-            state, reward = test_problem.step((swap_i, swap_j))
-            ep.write((swap_i, swap_j), action_idx, reward.item())
-            g = to_cuda(state)
+                S_a_encoding, h1, h2, Q_sa = self.alg.forward_MHA(self.bg, batch_legal_actions, gnn_step=gnn_step)
+            # # epsilon greedy strategy
+            # if torch.rand(1) > explore_prob:
+            #     # action_idx1 = Q_sa.argmax()
+            #     weight = torch.softmax(softmax_constant * Q_sa.detach().cpu(), dim=0)
+            #     # print(max(weight))
+            #     action_idx = self.action_indices.sample(n=1, weights=weight).values[0][0]
+            #     # print('111', action_idx1)
+            #     # print('222', action_idx)
+            # else:
+            #     action_idx = torch.randint(high=legal_actions.shape[0], size=(1,)).squeeze()
 
-        return S, ep
+            # print(Q_sa.view(-1, self.num_actions).max(dim=1))
+            best_actions = Q_sa.view(-1, self.num_actions).argmax(dim=1)
+            chose_actions = torch.tensor(
+                [x if torch.rand(1) > explore_prob else torch.randint(high=self.num_actions, size=(1,)).squeeze() for x in
+                 best_actions]).cuda()
+            chose_actions += self.action_mask
 
-    def run_test(self, episode_len=50, explore_prob=.0, time_aware=False, criteria='end', softmax_constant=1.0):
+            actions = batch_legal_actions[chose_actions]
 
-        for i in tqdm(range(self.num_instance)):
-            if self.retain_test:
-                s, ep = self.test_model(problem=self.problem[i], episode_len=episode_len, explore_prob=explore_prob, time_aware=time_aware, softmax_constant=softmax_constant)
-            else:
-                s, ep = self.test_model(episode_len=episode_len, explore_prob=explore_prob, time_aware=time_aware, softmax_constant=softmax_constant)
-            self.S.append(s.item())
-            self.episodes.append((ep))
-            if criteria == 'max':
-                cum_gain = np.cumsum(ep.reward_seq)
-                self.max_gain.append(max(cum_gain))
-                self.max_gain_budget.append(1 + np.argmax(cum_gain).item())
-                self.max_gain_ratio.append(self.max_gain[-1] / s)
-            else:
-                self.max_gain.append(sum(ep.reward_seq))
-                self.max_gain_budget.append(episode_len)
-                self.max_gain_ratio.append(self.max_gain[-1] / s)
+            _, rewards = self.problem.step_batch(states=self.bg, action=actions)
+
+            R = [reward.item() for reward in rewards]
+
+            [ep[k].write(action=actions[k, :], action_idx=best_actions[k] - self.action_mask[k], reward=R[k]) for k in range(batch_size)]
+
+        self.episodes = ep
+
+    # def run_test_(self, episode_len=50, explore_prob=.0, time_aware=False, criteria='end', softmax_constant=1.0):
+    #
+    #     for i in tqdm(range(self.num_instance)):
+    #         if self.retain_test:
+    #             s, ep = self.test_model(problem=self.problem[i], episode_len=episode_len, explore_prob=explore_prob, time_aware=time_aware, softmax_constant=softmax_constant)
+    #         else:
+    #             s, ep = self.test_model(episode_len=episode_len, explore_prob=explore_prob, time_aware=time_aware, softmax_constant=softmax_constant)
+    #         self.S.append(s.item())
+    #         self.episodes.append((ep))
+    #         if criteria == 'max':
+    #             cum_gain = np.cumsum(ep.reward_seq)
+    #             self.max_gain.append(max(cum_gain))
+    #             self.max_gain_budget.append(1 + np.argmax(cum_gain).item())
+    #             self.max_gain_ratio.append(self.max_gain[-1] / s)
+    #         else:
+    #             self.max_gain.append(sum(ep.reward_seq))
+    #             self.max_gain_budget.append(episode_len)
+    #             self.max_gain_ratio.append(self.max_gain[-1] / s)
 
     def show_result(self):
 
+        episode_gains = []
+        episode_max_gains = []
+        episode_gain_ratios = []
+        for i in range(self.batch_size):
+            episode_gains.append(sum(self.episodes[i].reward_seq))
+            episode_max_gains.append(max(np.cumsum(self.episodes[i].reward_seq)))
+            episode_gain_ratios.append(sum(self.episodes[i].reward_seq) / self.S[i].item())
         print('Avg value of initial S:', np.mean(self.S))
-        print('Avg max gain:', np.mean(self.max_gain))
+        print('Avg episode gain:', np.mean(episode_gains))
+        print('Avg episode max gain:', np.mean(episode_max_gains))
         # print('Avg max gain budget:', np.mean(self.max_gain_budget))
         # print('Var max gain budget:', np.std(self.max_gain_budget))
-        print('Avg percentage max gain:', np.mean(self.max_gain_ratio))
-        print('Percentage of instances with positive gain:', len([x for x in self.max_gain if x > 0]) / self.num_instance)
+        print('Avg percentage max gain:', np.mean(episode_gain_ratios))
+        print('Percentage of instances with positive gain:', len([x for x in episode_gains if x > 0]) / self.batch_size)
 
 # if __name__ == '__main__':
 #

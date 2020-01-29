@@ -21,7 +21,6 @@ class Psaq:
     best_q: float
 
 
-
 class data_handler():
 
     def __init__(self, path=None, data_chunks=None, num_chunks=100, batch_size=100, rotate_label=True):

@@ -54,9 +54,10 @@ parser.add_argument('--n_epoch', default=10000)
 parser.add_argument('--save_ckpt_step', default=1000)
 parser.add_argument('--target_update_step', default=5)
 parser.add_argument('--replay_buffer_size', default=100, help="")
+parser.add_argument('--replay_buffer_size2', default=5000, help="")
 parser.add_argument('--batch_size', default=1000, help='')
 parser.add_argument('--grad_accum', default=1, help='')
-parser.add_argument('--sample_batch_episode', default=False, help='')
+parser.add_argument('--sample_batch_episode', default=True, help='')
 parser.add_argument('--n_episode', default=10, help='')
 parser.add_argument('--episode_len', default=50, help='')
 parser.add_argument('--gnn_step', default=3, help='')
@@ -82,6 +83,7 @@ a = int(args['a'])
 gamma = float(args['gamma'])
 lr = args['lr']    # learning rate
 replay_buffer_size = int(args['replay_buffer_size'])
+replay_buffer_size2 = int(args['replay_buffer_size2'])
 target_update_step = int(args['target_update_step'])
 batch_size = int(args['batch_size'])
 grad_accum = int(args['grad_accum'])
@@ -100,12 +102,13 @@ os.environ['CUDA_VISIBLE_DEVICES'] = gpu
 
 # current working path
 # absroot = os.path.dirname(os.getcwd())
-path = os.path.abspath(os.path.join(os.getcwd(), "..")) + '/Models/' + save_folder + '/'
+# path = os.path.abspath(os.path.join(os.getcwd(), "..")) + '/Models/' + save_folder + '/'
+path = '/p/reinforcement/data/gnn_rl/model/dqn/' + save_folder + '/'
 if not os.path.exists(path):
     os.makedirs(path)
 
 # problem instances
-problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h)
+problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h, sample_episode=n_episode)
 
 # model to be trained
 if not resume:
@@ -113,6 +116,7 @@ if not resume:
     alg = DQN(problem, action_type=action_type
               , gamma=gamma, eps=.1, lr=lr
               , replay_buffer_max_size=replay_buffer_size
+              , replay_buffer_max_size2=replay_buffer_size2
               , extended_h=extend_h
               , time_aware=time_aware
               , use_x=use_x
@@ -145,19 +149,20 @@ def run_dqn(alg):
 
         if i % save_ckpt_step == save_ckpt_step - 1:
             with open(path + 'dqn_'+str(model_version+i+1), 'wb') as model_file:
-                pickle.dump(alg, model_file)
-            with open(path + 'dqn_'+str(model_version+i+1), 'rb') as model_file:
-                alg = pickle.load(model_file)
+                if k * m > 30:  # too large to dump
+                    pickle.dump(alg.model, model_file)
+                else:
+                    pickle.dump(alg, model_file)
 
         if i > len(eps) - 1:
             alg.eps = eps[-1]
         else:
             alg.eps = eps[i]
 
-        if i == 0:
-            # init the replay buffer at the beginning
-            for ii in range(replay_buffer_size):
-                alg.run_episode(action_type=alg.action_type, gnn_step=gnn_step, episode_len=episode_len, print_info=False)
+        # if i == 0:
+        #     # init the replay buffer at the beginning
+        #     for ii in range(replay_buffer_size):
+        #         alg.run_episode(action_type=alg.action_type, gnn_step=gnn_step, episode_len=episode_len, print_info=False)
 
         T1 = time.time()
         # TODO memory usage :: episode_len * num_episodes * hidden_dim

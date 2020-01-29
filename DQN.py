@@ -8,14 +8,15 @@ import torch
 import random
 import numpy as np
 import dgl
+from dgl.graph import DGLGraph
 import torch.nn.functional as F
 from copy import deepcopy as dc
 import pickle
 import os
 from log_utils import mean_val, logger
 from k_cut import *
+from dataclasses import dataclass
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 
 def to_cuda(G_):
@@ -107,6 +108,14 @@ class EpisodeHistory:
         self.label_perm = self.label_perm.long()
 
 
+
+@dataclass
+class sars:
+    s0: DGLGraph
+    a: tuple
+    r: float
+    s1: DGLGraph
+
 def weight_monitor(model, model_target):
     # gnn_0 = torch.mean(model.layers[0].apply_mod.l0.weight).item(), torch.std(model.layers[0].apply_mod.l0.weight).item()
     # gnn_1 = torch.mean(model.layers[0].apply_mod.l1.weight).item(), torch.std(model.layers[0].apply_mod.l1.weight).item()
@@ -164,7 +173,7 @@ def weight_monitor(model, model_target):
 
 
 class DQN:
-    def __init__(self, problem, action_type='swap', gamma=1.0, eps=0.1, lr=1e-4, replay_buffer_max_size=10, extended_h=False, time_aware=False, use_x=True, clip_target=False, use_calib_reward=False, cuda_flag=True):
+    def __init__(self, problem, action_type='swap', gamma=1.0, eps=0.1, lr=1e-4, replay_buffer_max_size=10, replay_buffer_max_size2=5000, extended_h=False, time_aware=False, use_x=False, clip_target=False, use_calib_reward=False, cuda_flag=True):
 
         self.problem = problem
         self.action_type = action_type
@@ -188,9 +197,11 @@ class DQN:
         self.gamma = gamma  # reward decay const
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
         self.experience_replay_buffer = []
+        self.experience_replay_buffer2 = []
         self.buffer_episode_offset = [0]
         self.buffer_indices = []
         self.replay_buffer_max_size = replay_buffer_max_size
+        self.replay_buffer_max_size2 = replay_buffer_max_size2
         self.time_aware = time_aware
         self.cuda = cuda_flag
         self.log = logger()
@@ -207,13 +218,14 @@ class DQN:
             # if m.bias is not None:
             #     torch.nn.init.xavier_uniform_(m.bias)
 
-    def run_episode(self, action_type='swap', gnn_step=10, episode_len=50, print_info=False):
+    def run_episode_(self, action_type='swap', gnn_step=3, episode_len=50, print_info=False):
         sum_r = 0
         state = self.problem.reset(compute_S=False)
         t = 0
-
+        T1 = time.time()
         ep = EpisodeHistory(state, episode_len, action_type=action_type)
-
+        T2 = time.time()
+        # print('EpisodeHistory init:', T2-T1)
         terminal_flag = False
 
         while t < episode_len and not terminal_flag:
@@ -263,12 +275,15 @@ class DQN:
             #     random_action = torch.randint(high=legal_actions.shape[0], size=(1, )).squeeze()
             #     swap_i, swap_j = legal_actions[random_action]
             #     trial += 1
-
+            T1 = time.time()
             state, reward = self.problem.step((swap_i, swap_j), action_type=action_type)
+            T2 = time.time()
 
             ep.write(action=(swap_i, swap_j), action_idx=best_action, reward=reward.item())
 
             sum_r += reward
+
+            # print('step time:', T2 - T1)
 
             if t == 0:
                 R = reward.unsqueeze(0)
@@ -289,7 +304,7 @@ class DQN:
 
         return R, tot_return
 
-    def run_batch_episode(self, action_type='swap', gnn_step=10, episode_len=50, batch_size=10, print_info=False):
+    def run_batch_episode_(self, action_type='swap', gnn_step=3, episode_len=50, batch_size=10, print_info=False):
 
         sum_r = 0
         state = self.problem.gen_batch_graph(batch_size=batch_size)
@@ -354,6 +369,55 @@ class DQN:
         tot_return = sum(R).item()
 
         return R, tot_return
+
+    def run_batch_episode(self, action_type='swap', gnn_step=3, episode_len=50, batch_size=10, print_info=False):
+
+        sum_r = 0
+        bg = to_cuda(self.problem.gen_batch_graph(batch_size=batch_size))
+        t = 0
+
+        num_actions = self.problem.get_legal_actions(action_type=action_type).shape[0]
+        action_mask = torch.tensor(range(0, num_actions * batch_size, num_actions)).cuda()
+
+        explore_dice = (torch.rand(episode_len, batch_size) < self.eps)
+        explore_replace_mask = explore_dice.nonzero()  #
+        explore_step_offset = torch.cat([torch.zeros([1], dtype=torch.long), torch.cumsum(explore_dice.sum(dim=1), dim=0)], dim=0)
+        explore_replace_actions = torch.randint(high=num_actions, size=(explore_replace_mask.shape[0], )).cuda()
+
+        while t < episode_len:
+
+            batch_legal_actions = self.problem.get_legal_actions(state=bg, action_type=action_type).cuda()
+
+            # epsilon greedy strategy
+            #TODO: cannot dc bg once being forwarded.
+            _, _, _, Q_sa = self.model(dc(bg), batch_legal_actions, action_type=action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-t-1)
+            best_actions = Q_sa.view(-1, num_actions).argmax(dim=1)
+
+            # chosen_actions = torch.tensor([x if torch.rand(1) > self.eps else torch.randint(high=num_actions, size=(1,)).squeeze() for x in best_actions]).cuda()
+            # chosen_actions += action_mask
+            # actions = batch_legal_actions[chosen_actions]
+            explore_episode_indices = explore_replace_mask[explore_step_offset[t]: explore_step_offset[t + 1]][:, 1]
+            explore_actions = explore_replace_actions[explore_step_offset[t]: explore_step_offset[t + 1]]
+            best_actions[explore_episode_indices] = explore_actions
+            best_actions += action_mask
+
+            actions = batch_legal_actions[best_actions]
+
+            # update bg inplace and calculate batch rewards
+            g0 = [g for g in dgl.unbatch(dc(bg))]  # current_state
+            _, rewards = self.problem.step_batch(states=bg, action=actions)
+            g1 = [g for g in dgl.unbatch(dc(bg))]  # after_state
+
+            self.experience_replay_buffer2.extend([sars(g0[i], actions[i], rewards[i], g1[i]) for i in range(batch_size)])
+
+            R = [reward.item() for reward in rewards]
+            sum_r += sum(R)
+
+            t += 1
+
+        self.log.add_item('tot_return', sum_r)
+
+        return R
 
     def sample_from_buffer(self, epoch, batch_size, q_step, gnn_step, episode_len, ddqn):
 
@@ -430,18 +494,14 @@ class DQN:
         if not ddqn:
             # only compute limited number for Q_s1a
             _, _, _, Q_s1a_ = self.model(batch_begin_state, batch_begin_action[begin_action_list], action_type=self.action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-step_j-1)
-
-            if epoch < 500:
+            _, _, _, Q_s2a = self.model_target(batch_end_state, batch_end_action, action_type=self.action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-step_j-1-q_step)
+            # Q_s2a = Q_s2a.detach()
+            if self.clip_target:
+                Q_s2a = F.relu(Q_s2a)
+            if self.time_aware and step_j + q_step == episode_len - 1:
                 q = - Q_s1a_
             else:
-                _, _, _, Q_s2a = self.model_target(batch_end_state, batch_end_action, action_type=self.action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-step_j-1-q_step)
-                # Q_s2a = Q_s2a.detach()
-                if self.clip_target:
-                    Q_s2a = F.relu(Q_s2a)
-                if self.time_aware and step_j + q_step == episode_len - 1:
-                    q = - Q_s1a_
-                else:
-                    q = self.gamma ** q_step * Q_s2a.view(-1, G_start_actions.shape[0]).max(dim=1).values - Q_s1a_
+                q = self.gamma ** q_step * Q_s2a.view(-1, G_start_actions.shape[0]).max(dim=1).values - Q_s1a_
         else:
             _, _, _, Q_s1a = self.model(batch_begin_state, batch_begin_action, action_type=self.action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-step_j-1)
             max_action_list = action_mask + Q_s1a.view(-1, G_start_actions.shape[0]).argmax(dim=1)
@@ -516,6 +576,31 @@ class DQN:
 
         # return torch.cat(R), torch.cat(Q)
 
+    def sample_from_buffer2(self, batch_size, q_step, gnn_step):
+
+        batch_size = min(batch_size, len(self.experience_replay_buffer2))
+        sample_buffer = random.sample(self.experience_replay_buffer2, batch_size)
+
+        # make batches
+        batch_begin_state = dgl.batch([tpl.s0 for tpl in sample_buffer])
+        batch_end_state = dgl.batch([tpl.s1 for tpl in sample_buffer])
+        R = [tpl.r.unsqueeze(0) for tpl in sample_buffer]
+        batch_begin_action = torch.cat([tpl.a.unsqueeze(0) for tpl in sample_buffer], axis=0)
+        batch_end_action = self.problem.get_legal_actions(state=batch_end_state, action_type=self.action_type).cuda()
+        action_num = batch_end_action.shape[0] // batch_begin_action.shape[0]
+
+        # only compute limited number for Q_s1a
+        _, _, _, Q_s1a_ = self.model(batch_begin_state, batch_begin_action, action_type=self.action_type, gnn_step=gnn_step)
+        _, _, _, Q_s2a = self.model_target(batch_end_state, batch_end_action, action_type=self.action_type, gnn_step=gnn_step)
+        # Q_s2a = Q_s2a.detach()
+        if self.clip_target:
+            Q_s2a = F.relu(Q_s2a)
+        else:
+            q = self.gamma ** q_step * Q_s2a.view(-1, action_num).max(dim=1).values - Q_s1a_
+
+        Q = q.unsqueeze(0)
+
+        return torch.cat(R), Q
 
     def back_loss(self, R, Q, update_model=True):
         # print('actual batch size:', R.shape.numel())
@@ -546,12 +631,16 @@ class DQN:
         :param ddqn: train in ddqn mode
         :return:
         """
+
         print_info = False  # (i % num_episodes == num_episodes - 1)
         if sample_batch_episode:
+            T3 = time.time()
             self.run_batch_episode(action_type=self.action_type, gnn_step=gnn_step, episode_len=episode_len,
                                    batch_size=num_episodes, print_info=print_info)
+            T4 = time.time()
         else:
             mean_return = 0
+
             for i in range(num_episodes):
                 # 0.2s
                 [_, tot_return] = self.run_episode(action_type=self.action_type, gnn_step=gnn_step, episode_len=episode_len, print_info=print_info)
@@ -562,12 +651,16 @@ class DQN:
 
         for i in range(grad_accum):
             # 2s
-            R, Q = self.sample_from_buffer(epoch=epoch, batch_size=batch_size, q_step=q_step, gnn_step=gnn_step, episode_len=episode_len, ddqn=ddqn)
+            T5 = time.time()
+            R, Q = self.sample_from_buffer2(batch_size=batch_size, q_step=q_step, gnn_step=gnn_step)
+            # R, Q = self.sample_from_buffer(epoch=epoch, batch_size=batch_size, q_step=q_step, gnn_step=gnn_step, episode_len=episode_len, ddqn=ddqn)
+            T6 = time.time()
             # 0.5s
             self.back_loss(R, Q, update_model=(i % grad_accum == grad_accum - 1))
+            T7 = time.time()
             del R, Q
             torch.cuda.empty_cache()
-
+        print(T4-T3, T5-T4, T6-T5, T7-T6)
         return self.log
 
     def trim_replay_buffer(self):
@@ -577,6 +670,9 @@ class DQN:
             self.buffer_episode_offset = self.buffer_episode_offset[-1-self.replay_buffer_max_size:]
             shift = self.buffer_episode_offset[0]
             self.buffer_episode_offset = [offset - shift for offset in self.buffer_episode_offset]
+
+        if len(self.experience_replay_buffer2) > self.replay_buffer_max_size2:
+            self.experience_replay_buffer2 = self.experience_replay_buffer2[-self.replay_buffer_max_size2:]
 
     def update_target_net(self):
         self.model_target = pickle.loads(pickle.dumps(self.model))

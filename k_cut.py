@@ -1,14 +1,23 @@
 import math
 from copy import deepcopy as dc
 import itertools
-import numpy as np
 import dgl
-from dgl.graph import DGLGraph
 from dgl.batched_graph import BatchedDGLGraph
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
+def is_identical(G1, G2):
+    a = torch.max(torch.pow(G1.ndata['x'] - G2.ndata['x'], 2)).item() + \
+    torch.max(torch.pow(G1.ndata['label'] - G2.ndata['label'], 2)).item() + \
+    torch.max(torch.pow(G1.edata['d'] - G2.edata['d'], 2)).item() + \
+    torch.max(torch.pow(G1.edata['e_type'] - G2.edata['e_type'], 2)).item()
+    if a < 1e-8:
+        return True
+    else:
+        print(a)
+        return False
 
 class GraphGenerator:
 
@@ -23,7 +32,7 @@ class GraphGenerator:
         self.dst = [i % self.n for i in self.nonzero_idx]
         self.adj_mask = torch.tensor(range(0, self.n ** 2, self.n)).unsqueeze(1).expand(self.n, ajr + 1)
 
-    def generate_G(self, x=None, label=None, a=1):
+    def generate_G(self, x=None, label=None, hidden_dim=16, a=1):
 
         # init graph
         k = self.k
@@ -61,9 +70,54 @@ class GraphGenerator:
         g.edata['e_type'] = torch.cat([adjacent_matrix[self.nonzero_idx, :], group_matrix[self.nonzero_idx, :]], dim=1)
 
         # init node embedding h
-        # g.ndata['h'] = torch.zeros((g.number_of_nodes(), hidden_dim))
+        g.ndata['h'] = torch.zeros((g.number_of_nodes(), hidden_dim))
 
         return g
+
+    def generate_batch_G(self, batch_size=1, hidden_dim=16, a=1):
+
+        # init graph
+        k = self.k
+        m = self.m
+        n = self.n
+        ajr = self.ajr
+
+        # init batch graphs
+        gs = [dgl.DGLGraph() for i in range(batch_size)]
+        _ = [(g.add_nodes(n), g.add_edges(self.src, self.dst)) for g in gs]
+
+        bg = dgl.batch(gs)
+
+        # 2-d coordinates 'x'
+        bg.ndata['x'] = torch.rand((batch_size * n, 2))
+
+        # label
+        label = torch.tensor(range(k)).unsqueeze(1).repeat(batch_size, m).view(-1)
+        batch_mask = torch.tensor(range(0, n * batch_size, n)).unsqueeze(1).expand(batch_size, n).flatten()
+        perm_idx = torch.cat([torch.randperm(n) for i in range(batch_size)]) + batch_mask
+        label = label[perm_idx].view(batch_size, n)
+        bg.ndata['label'] = torch.nn.functional.one_hot(label, k).float().view(batch_size * n, k)
+
+        # calculate edges
+        _, neighbor_idx, dist_matrix = dgl.transform.knn_graph(bg.ndata['x'].view(batch_size, n, -1), ajr + 1, extend_info=True)
+
+        bg.edata['d'] = torch.sqrt(dist_matrix.view(batch_size, -1, 1)[:, self.nonzero_idx, :]).view(-1, 1)
+        bg.edata['w'] = 1.0 / (1.0 + torch.exp(a * bg.edata['d']))
+
+        neighbor_idx -= torch.tensor(range(0, batch_size * n, n)).view(batch_size, 1, 1).repeat(1, n, ajr + 1) \
+                        - torch.tensor(range(0, batch_size * n * n, n * n)).view(batch_size, 1, 1).repeat(1, n, ajr + 1)
+        adjacent_matrix = torch.zeros((batch_size * n * n, 1))
+        adjacent_matrix[neighbor_idx + self.adj_mask.repeat(batch_size, 1, 1)] = 1
+        adjacent_matrix = adjacent_matrix.view(batch_size, n * n, 1)[:, self.nonzero_idx, :].view(-1, 1)
+
+        group_matrix = torch.bmm(bg.ndata['label'].view(batch_size, n, -1), bg.ndata['label'].view(batch_size, n, -1).transpose(1, 2)).view(batch_size, -1)[:, self.nonzero_idx].view(-1, 1)
+
+        bg.edata['e_type'] = torch.cat([adjacent_matrix, group_matrix], dim=1)
+
+        # init node embedding h
+        bg.ndata['h'] = torch.zeros((n * batch_size, hidden_dim))
+
+        return bg
 
 # def generate_G(k, m, adjacent_reserve, hidden_dim, random_sample_node=True, x=None, random_init_label=True, label=None, a=1):
 #
@@ -130,9 +184,9 @@ class GraphGenerator:
 
 class KCut_DGL:
 
-    def __init__(self, k, m, adjacent_reserve, hidden_dim, x=None, label=None, a=1):
+    def __init__(self, k, m, adjacent_reserve, hidden_dim, x=None, label=None, a=1, sample_episode=10):
         self.graph_generator = GraphGenerator(k=k, m=m, ajr=adjacent_reserve)
-        self.g = self.graph_generator.generate_G(x=x, label=label, a=a)
+        self.g = self.graph_generator.generate_G(x=x, label=label, hidden_dim=hidden_dim, a=a)
         self.N = k * m
         self.k = k  # num of clusters
         self.m = m  # num of nodes in cluster
@@ -142,6 +196,9 @@ class KCut_DGL:
         self.label = label
         self.a = a
         self.S = self.calc_S()
+        # assert(sample_episode == states.batch_size) in step_batch
+        self.mask1 = torch.tensor(range(0, self.N * sample_episode, self.N)).cuda()
+        self.mask2 = torch.tensor(range(0, self.N * sample_episode, self.N)).repeat(m, 1).t().flatten().cuda()
 
     def calc_S(self, g=None):
         if g is None:
@@ -157,8 +214,9 @@ class KCut_DGL:
                 S += torch.sum(torch.sqrt(torch.diag(torch.mm(block_ij, block_ij.t()))))
         return S/2
 
-    def gen_batch_graph(self, batch_size):
-        return [self.graph_generator.generate_G(x=self.x, label=self.label, a=self.a) for i in range(batch_size)]
+    def gen_batch_graph(self, batch_size, hidden_dim=16, a=1):
+        # return [self.graph_generator.generate_G(x=self.x, label=self.label, a=self.a) for i in range(batch_size)]
+        return self.graph_generator.generate_batch_G(batch_size=batch_size, hidden_dim=hidden_dim, a=1)
 
     def reset(self, compute_S=True):
         self.g = self.graph_generator.generate_G(x=self.x, label=self.label, a=self.a)
@@ -170,7 +228,7 @@ class KCut_DGL:
         if g is None:
             g = self.g
         label = torch.tensor(label)
-        g.ndata['label'] = torch.nn.functional.one_hot(label, self.k).float()
+        g.ndata['label'] = torch.nn.functional.one_hot(label, self.k).float().cuda()
 
         # rewire edges
         if rewire_edges:
@@ -178,10 +236,10 @@ class KCut_DGL:
                 if j != i:
                     u_label = g.nodes[j].data['label']
                     v_label = g.nodes[i].data['label']
-                    if torch.max(u_label-v_label).numpy() < .5:
-                        cluster_label = torch.tensor([[1.]])
+                    if torch.max(u_label-v_label).cpu().numpy() < .5:
+                        cluster_label = torch.tensor([[1.]]).cuda()
                     else:
-                        cluster_label = torch.tensor([[0.]])
+                        cluster_label = torch.tensor([[0.]]).cuda()
                     # add group members
                     g.edges[i, j].data['e_type'] \
                         = torch.cat([g.edges[i, j].data['e_type'][:, 0].unsqueeze(0), cluster_label], dim=1)
@@ -195,21 +253,40 @@ class KCut_DGL:
         if state is None:
             state = self.g
 
-        if action_type=='flip':
+        if action_type == 'flip':
             legal_actions = torch.nonzero(1 - state.ndata['label'])
-        if action_type=='swap':
-            mask = torch.mm(state.ndata['label'], state.ndata['label'].t())
-            legal_actions = torch.triu(1 - mask).nonzero()
+        if action_type == 'swap':
+            if isinstance(state, BatchedDGLGraph):
+                n = state.number_of_nodes() // state.batch_size
+                mask = torch.bmm(state.ndata['label'].view(state.batch_size, n, -1),
+                                 state.ndata['label'].view(state.batch_size, n, -1).transpose(1, 2))
+                legal_actions = torch.triu(1 - mask).nonzero()[:, 1:3]  # tensor (270, 2)
+            else:
+                mask = torch.mm(state.ndata['label'], state.ndata['label'].t())
+                legal_actions = torch.triu(1 - mask).nonzero()  # List[tensor(27, 2), ...]
 
         return legal_actions
 
-    def calc_swap_delta(self, i, j, i_label, j_label, state=None):
+    def calc_swap_delta(self, i, j, i_label, j_label, state=None, n=9, batch_size=10):
 
         if state is None:
             state = self.g
 
-        return state.ndata['x'][i] - state.ndata['x'][(state.ndata['label'][:, i_label] > 0).nonzero().squeeze()], \
-                state.ndata['x'][j] - state.ndata['x'][(state.ndata['label'][:, j_label] > 0).nonzero().squeeze()]
+        if isinstance(state, BatchedDGLGraph):
+            # i = torch.tensor([0, 0, 0, 0, 0, 0, 1, 1, 1, 1])
+            # j = torch.tensor([1, 3, 4, 5, 7, 8, 2, 4, 6, 7])
+            # i_label = [0, 0, 0, 0, 0, 0, 2, 2, 2, 2]
+            # j_label = [1, 1, 0, 1, 0, 0, 2, 0, 2, 0]
+            xi, xj = state.ndata['x'][i + self.mask1].view(batch_size, 1, 2), state.ndata['x'][j + self.mask1].view(batch_size, 1, 2)
+            group_position_ = torch.nn.functional.one_hot(torch.tensor([i_label, j_label]).t(), self.k).float().transpose(1, 2).cuda()
+            group_position = torch.bmm(state.ndata['label'].view(batch_size, n, self.k), group_position_)
+            xi_group, xj_group = state.ndata['x'][group_position[:, :, 0].nonzero()[:, 1] + self.mask2].view(batch_size, self.m, 2)\
+                , state.ndata['x'][group_position[:, :, 1].nonzero()[:, 1] + self.mask2].view(batch_size, self.m, 2)
+
+            return xi - xi_group, xj - xj_group  #(batch_size, m, 2)
+        else:
+            return state.ndata['x'][i] - state.ndata['x'][(state.ndata['label'][:, i_label] > 0).nonzero().squeeze()], \
+                    state.ndata['x'][j] - state.ndata['x'][(state.ndata['label'][:, j_label] > 0).nonzero().squeeze()]
 
     def calc_flip_delta(self, i, i_label, target_label, state=None):
 
@@ -302,6 +379,41 @@ class KCut_DGL:
             self.S -= reward
 
         return state, reward
+
+    def step_batch(self, states, action):
+        """
+        :param states: BatchedDGLGraph
+        :param action: torch.tensor((batch_size, 2))
+        :return:
+        """
+        batch_size = states.batch_size
+        n = states.number_of_nodes() // batch_size
+
+        ii, jj = action[:, 0], action[:, 1]
+        ij_label = [(states.ndata['label'][c] > 0).nonzero().item() for c in action.t().flatten() + torch.tensor(range(0, n * batch_size, n)).repeat(1, 2).squeeze(0).cuda()]
+        ii_label, jj_label = ij_label[0: batch_size], ij_label[batch_size: 2 * batch_size]
+
+        # compute reward  (batch_size, m, 2)
+        old_0, old_1 = self.calc_swap_delta(ii, jj, ii_label, jj_label, states, n=n, batch_size=batch_size)
+
+        # swap two sets of nodes
+        tmp = dc(states.ndata['label'][ii + self.mask1])
+        states.ndata['label'][ii + self.mask1] = states.ndata['label'][jj + self.mask1]
+        states.ndata['label'][jj + self.mask1] = tmp
+        # pert_idx = torch.tensor(range(batch_size * n))
+        # pert_idx[ii + self.mask1] = jj + self.mask1
+        # pert_idx[jj + self.mask1] = ii + self.mask1
+        # states.ndata['label'] = states.ndata['label'][pert_idx]
+
+        # rewire edges
+        states.edata['e_type'][:, 1] = torch.bmm(states.ndata['label'].view(batch_size, n, -1), states.ndata['label'].view(batch_size, n, -1).transpose(1, 2)).view(batch_size, -1)[:, self.graph_generator.nonzero_idx].view(-1)
+
+        new_0, new_1 = self.calc_swap_delta(ii, jj, jj_label, ii_label, states, n=n, batch_size=batch_size)
+
+        rewards = torch.sqrt(torch.sum(torch.pow(torch.cat([old_0, old_1], axis=1), 2), axis=2)).sum(dim=1) \
+                 - torch.sqrt(torch.sum(torch.pow(torch.cat([new_0, new_1], axis=1), 2), axis=2)).sum(dim=1)
+
+        return states, rewards
 
 
 def udf_u_mul_e(edges):
@@ -539,17 +651,65 @@ class DQNet(nn.Module):
         # baseline
         self.t5 = nn.Linear(2 * self.hidden_dim, 1)
         self.t6 = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.t66 = nn.Linear(5, self.hidden_dim)
         # # for centroid graph representation
         # self.t5_ = nn.Linear((self.k + 2) * self.hidden_dim, 1)
         # self.t6_ = nn.Linear(self.hidden_dim * self.k, self.hidden_dim * self.k)
 
         self.t7 = nn.Linear(2 * self.hidden_dim, self.hidden_dim)
+        self.t77 = nn.Linear(10, self.hidden_dim)
         self.t8 = nn.Linear(self.hidden_dim + self.k, self.hidden_dim)
 
         self.h_residual = []
         self.info = ''
 
-    def forward_vanilla(self, g, actions=None, action_type='swap', gnn_step=3, time_aware=False, remain_episode_len=None):
+    def forward_nognn(self, g, actions=None, action_type='swap', gnn_step=3, time_aware=False, remain_episode_len=None):
+        if isinstance(g, BatchedDGLGraph):
+            batch_size = g.batch_size
+            num_action = actions.shape[0] // batch_size
+        else:
+            num_action = actions.shape[0]
+
+
+        g.ndata['h'] = torch.cat([g.ndata['x'], g.ndata['label']], dim=1)
+
+        # compute group centroid for batch graph g
+        # batch_centroid = []
+        # for i in range(self.k):
+        #     blocks_i = g.ndata['h'][(g.ndata['label'][:, i] > .5).nonzero().squeeze()]
+        #     batch_centroid.append(torch.mean(blocks_i.view(batch_size, self.m, self.hidden_dim), axis=1))
+
+        if isinstance(g, BatchedDGLGraph):
+            # graph_embedding = self.t6_(torch.cat(batch_centroid, axis=1)).repeat(1, num_action).view(num_action * batch_size, -1) # batch_size * (h * k)
+            graph_embedding = self.t66(dgl.mean_nodes(g, 'h')).repeat(1, num_action).view(num_action * batch_size, -1)
+        else:
+            graph_embedding = self.t66(torch.mean(g.ndata['h'], dim=0)).repeat(num_action, 1)
+
+        if isinstance(g, BatchedDGLGraph):
+            action_mask = torch.tensor(range(0, self.n * batch_size, self.n))\
+                .unsqueeze(1).expand(batch_size, 2)\
+                .repeat(1, num_action)\
+                .view(num_action * batch_size, -1)
+
+            actions_ = actions + action_mask.cuda()
+        else:
+            actions_ = actions
+
+        if action_type == 'flip':
+            q_actions = self.t8(torch.cat([g.ndata['h'][actions_[:, 0], :], torch.nn.functional.one_hot(actions_[:, 1], g.ndata['label'].shape[1]).float()], axis=1))
+        if action_type == 'swap':
+            # q_actions = torch.cat([g.ndata['h'][actions_[:, 0], :], g.ndata['h'][actions_[:, 1], :]], axis=1)
+            q_actions = self.t77(torch.cat([g.ndata['h'][actions_[:, 0], :], g.ndata['h'][actions_[:, 1], :]], axis=1))
+
+        S_a_encoding = torch.cat([graph_embedding, q_actions], axis=1)
+
+        Q_sa = self.t5(F.relu(S_a_encoding)).squeeze()
+        # Q_sa = self.t5_(F.relu(S_a_encoding)).squeeze()
+        # Q_sa = (Q_sa.view(n, n) + Q_sa.view(n, n).t()).view(n**2)
+
+        return S_a_encoding, g.ndata['h'], g.ndata['h'], Q_sa
+
+    def forward(self, g, actions=None, action_type='swap', gnn_step=3, time_aware=False, remain_episode_len=None):
         if isinstance(g, BatchedDGLGraph):
             batch_size = g.batch_size
             num_action = actions.shape[0] // batch_size
@@ -580,10 +740,10 @@ class DQNet(nn.Module):
         h_new = h
 
         # compute group centroid for batch graph g
-        batch_centroid = []
-        for i in range(self.k):
-            blocks_i = g.ndata['h'][(g.ndata['label'][:, i] > .5).nonzero().squeeze()]
-            batch_centroid.append(torch.mean(blocks_i.view(batch_size, self.m, self.hidden_dim), axis=1))
+        # batch_centroid = []
+        # for i in range(self.k):
+        #     blocks_i = g.ndata['h'][(g.ndata['label'][:, i] > .5).nonzero().squeeze()]
+        #     batch_centroid.append(torch.mean(blocks_i.view(batch_size, self.m, self.hidden_dim), axis=1))
 
         if isinstance(g, BatchedDGLGraph):
             # graph_embedding = self.t6_(torch.cat(batch_centroid, axis=1)).repeat(1, num_action).view(num_action * batch_size, -1) # batch_size * (h * k)
@@ -615,7 +775,7 @@ class DQNet(nn.Module):
 
         return S_a_encoding, h_new, g.ndata['h'], Q_sa
 
-    def forward(self, g, actions=None, action_type='swap', gnn_step=3, time_aware=False, remain_episode_len=None):
+    def forward_MHA(self, g, actions=None, action_type='swap', gnn_step=3, time_aware=False, remain_episode_len=None):
         n = self.n
         k = self.k
         m = self.m

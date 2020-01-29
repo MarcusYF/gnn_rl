@@ -191,15 +191,74 @@ e4 = dc(state.edata['e_type'])
 
 
 problem.reset()
-timeit.timeit('gg.generate_G()'
+timeit.timeit('[gg.generate_G() for i in range(100)]'
+              , setup='from k_cut import GraphGenerator; gg = GraphGenerator(3,3,5)'
+              , number=100)  # 18s
+
+timeit.timeit('gg.generate_batch_G(batch_size=10)'
               , setup='from k_cut import GraphGenerator; gg = GraphGenerator(3,3,5)'
               , number=100)
+# 2.4s
+
+timeit.timeit('gg = [dgl.DGLGraph() for i in range(100)]; [g.add_nodes(9) for g in gg]'
+              , setup='import dgl'
+              , number=100)
+
 
 timeit.timeit('problem.reset(compute_S=False)'
               , setup='from k_cut import KCut_DGL; problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)'
-              , number=100)
+              , number=100)  # 0.2s
 
 
 timeit.timeit('problem.step((0,2))'
               , setup='from k_cut import KCut_DGL; problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16)'
               , number=100)
+
+G = GraphGenerator(3,4,5)
+bg = G.generate_batch_G(batch_size=10)
+bg = dgl.unbatch(bg)
+bg[7].ndata['x']
+bg[7].ndata['label']
+
+g7 = G.generate_G(x=bg[7].ndata['x'], label=[1,2,0,0,1,1,0,2,1,2,0,2])
+bg[7].ndata['x'] - g7.ndata['x']
+bg[7].ndata['label'] - g7.ndata['label']
+bg[7].edata['e_type'] - g7.edata['e_type']
+bg[7].edata['d'] - g7.edata['d']
+bg[7].edata['w'] - g7.edata['w']
+
+
+from k_cut import *
+from DQN import *
+problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16, sample_episode=5)
+
+bg = to_cuda(problem.gen_batch_graph(batch_size=5))
+g = [g for g in dgl.unbatch(bg)]
+
+g0 = dc(g)
+
+bg.ndata['label'][:9,:]
+g[0].ndata['label']
+
+bg0 = dc(bg)
+_, rewards = problem.step_batch(bg, torch.tensor([[0,1],[2,3],[2,4],[1,5],[1,8]]).cuda())
+[ 0.0000,  0.0000,  0.3813, -0.1092,  1.8039]
+g0_2, r = problem.step(state=g[1], action=(2,3))
+
+def check(g1, g2):
+    print(g2.ndata['x'] - g1.ndata['x'])
+    print(g2.ndata['label'] - g1.ndata['label'])
+    print(g2.edata['e_type'] - g1.edata['e_type'])
+    print(g2.edata['d'] - g1.edata['d'])
+    print(g2.edata['w'] - g1.edata['w'])
+
+check(g[1], bg1)
+
+problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16, sample_episode=100)
+test = test_summary(alg=alg, problem=problem, q_net='mlp')
+test.run_test(batch_size=100, gnn_step=3, episode_len=50, explore_prob=0.0)
+test.show_result()
+
+a = 0
+for i in range(100):
+    a += sum(ep[i].reward_seq)
