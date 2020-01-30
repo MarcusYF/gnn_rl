@@ -173,7 +173,7 @@ def weight_monitor(model, model_target):
 
 
 class DQN:
-    def __init__(self, problem, action_type='swap', gamma=1.0, eps=0.1, lr=1e-4, replay_buffer_max_size=10, replay_buffer_max_size2=5000, extended_h=False, time_aware=False, use_x=False, clip_target=False, use_calib_reward=False, cuda_flag=True):
+    def __init__(self, problem, action_type='swap', gamma=1.0, eps=0.1, lr=1e-4, replay_buffer_max_size=10, replay_buffer_max_size2=5000, extended_h=False, time_aware=False, use_x=False, edge_info='adj_weight', clip_target=False, use_calib_reward=False, cuda_flag=True):
 
         self.problem = problem
         self.action_type = action_type
@@ -186,12 +186,13 @@ class DQN:
         self.eps = eps  # constant for exploration in dqn
         self.extended_h = extended_h
         self.use_x = use_x
+        self.edge_info = edge_info
         self.clip_target = clip_target
         self.use_calib_reward = use_calib_reward
         if cuda_flag:
-            self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim, extended_h=self.extended_h, use_x=self.use_x).cuda()
+            self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim, extended_h=self.extended_h, use_x=self.use_x, edge_info=self.edge_info).cuda()
         else:
-            self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim, extended_h=self.extended_h, use_x=self.use_x)
+            self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=4, hidden_dim=self.hidden_dim, extended_h=self.extended_h, use_x=self.use_x, edge_info=self.edge_info)
         # self.model.apply(self.weights_init)  # initialize weight
         self.model_target = dc(self.model)
         self.gamma = gamma  # reward decay const
@@ -604,6 +605,10 @@ class DQN:
 
     def back_loss(self, R, Q, update_model=True):
         # print('actual batch size:', R.shape.numel())
+
+        print('current_R', R)
+        print('current_Q', Q)
+
         if self.cuda:
             R = R.cuda()
         L = torch.pow(R + Q, 2).sum()

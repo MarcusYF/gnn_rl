@@ -14,13 +14,14 @@ import os
 import pickle
 from tqdm import tqdm
 import json
+import math
 
 def latestModelVersion(file):
     versions = [0]
     for root, dirs, files in os.walk(file):
         for f in files:
             if len(f.split('_')) > 1:
-                versions.append(int(f.split('_')[1]))
+                versions.append(int(f.split('_')[-1]))
     return max(versions)
 
 # python run.py --gpu=0 --save_folder=dqn_0110_test_extend_h --extend_h=False --n_epoch=5000 --save_ckpt_step=500
@@ -41,6 +42,7 @@ parser.add_argument('--ajr', default=5, help="")
 parser.add_argument('--h', default=16, help="hidden dimension")
 parser.add_argument('--extend_h', default=True)
 parser.add_argument('--use_x', default=0)
+parser.add_argument('--edge_info', default='adj_weight')
 parser.add_argument('--clip_target', default=0)
 parser.add_argument('--use_calib_reward', default=0)
 parser.add_argument('--time_aware', default=False)
@@ -76,6 +78,7 @@ ajr = int(args['ajr'])
 h = int(args['h'])
 extend_h = bool(args['extend_h'])
 use_x = bool(int(args['use_x']))
+edge_info = args['edge_info']
 clip_target = bool(int(args['clip_target']))
 use_calib_reward = bool(int(args['use_calib_reward']))
 time_aware = bool(args['time_aware'])
@@ -120,6 +123,7 @@ if not resume:
               , extended_h=extend_h
               , time_aware=time_aware
               , use_x=use_x
+              , edge_info=edge_info
               , clip_target=clip_target
               , use_calib_reward=use_calib_reward
               , cuda_flag=True)
@@ -149,8 +153,11 @@ def run_dqn(alg):
 
         if i % save_ckpt_step == save_ckpt_step - 1:
             with open(path + 'dqn_'+str(model_version+i+1), 'wb') as model_file:
-                if k * m > 30:  # too large to dump
-                    pickle.dump(alg.model, model_file)
+                if k * m > 30 * 1:  # too large to dump
+                    pickle.dump([alg.model
+                                , alg.log.get_log("tot_return")
+                                , alg.log.get_log("Q_error")
+                                , [elem.r.item() for elem in alg.experience_replay_buffer2]], model_file)
                 else:
                     pickle.dump(alg, model_file)
 
@@ -176,6 +183,9 @@ def run_dqn(alg):
                , np.round(log.get_current('Q_error'), 3)
                , np.round(log.get_current('entropy'), 3)
                , np.round(T2-T1, 3)))
+
+        if math.isnan(log.get_current('Q_error')):
+            break
 
 if __name__ == '__main__':
     run_dqn(alg)

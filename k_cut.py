@@ -227,7 +227,8 @@ class KCut_DGL:
     def reset_label(self, label, g=None, calc_S=True, rewire_edges=True):
         if g is None:
             g = self.g
-        label = torch.tensor(label)
+        if not isinstance(label, torch.Tensor):
+            label = torch.tensor(label)
         g.ndata['label'] = torch.nn.functional.one_hot(label, self.k).float().cuda()
 
         # rewire edges
@@ -424,6 +425,8 @@ def udf_u_mul_e(edges):
         , 'm_n1_v': edges.src['h'] * edges.data['w'] * edges.data['e_type'][:, 0].unsqueeze(1)
         , 'm_n1_w': edges.data['w'] * edges.data['e_type'][:, 0].unsqueeze(1)
         , 'm_n1_d': edges.data['d'] * edges.data['e_type'][:, 0].unsqueeze(1)
+        , 'm_n_w': edges.data['w']
+        , 'm_n_d': edges.data['d']
         , 'm_n2_v': edges.src['h'] * edges.data['w'] * edges.data['e_type'][:, 1].unsqueeze(1)
         , 'm_n2_w': edges.data['w'] * edges.data['e_type'][:, 1].unsqueeze(1)
         , 'm_n2_d': edges.data['d'] * edges.data['e_type'][:, 1].unsqueeze(1)
@@ -438,11 +441,14 @@ def reduce(nodes):
 
     n1_h = torch.sum(nodes.mailbox['m_n1_h'], 1)
     n1_w = nodes.mailbox['m_n1_w']
-    return {'n1_v': n1_v, 'n2_v': n2_v, 'n1_e': n1_e, 'n2_e': n2_e, 'n1_h': n1_h, 'n1_w': n1_w}
+    n1_d = nodes.mailbox['m_n1_d']
+    n_w = nodes.mailbox['m_n_w']
+    n_d = nodes.mailbox['m_n_d']
+    return {'n1_v': n1_v, 'n2_v': n2_v, 'n1_e': n1_e, 'n2_e': n2_e, 'n1_h': n1_h, 'n1_w': n1_w, 'n1_d': n1_d, 'n_w': n_w, 'n_d': n_d}
 
 
 class NodeApplyModule(nn.Module):
-    def __init__(self, k, m, ajr, hidden_dim, activation, use_x=True):
+    def __init__(self, k, m, ajr, hidden_dim, activation, use_x=True, edge_info='adj_weight'):
         super(NodeApplyModule, self).__init__()
         self.ajr = ajr
         self.m = m
@@ -450,6 +456,7 @@ class NodeApplyModule(nn.Module):
         self.l1 = nn.Linear(k, hidden_dim)
         self.l2 = nn.Linear(hidden_dim, hidden_dim)
         self.l3 = nn.Linear(hidden_dim, hidden_dim)
+        self.edge_info = edge_info
         self.l4 = nn.Linear(ajr, hidden_dim)
         self.l5 = nn.Linear(m-1, hidden_dim)
 
@@ -462,22 +469,25 @@ class NodeApplyModule(nn.Module):
     def forward(self, node):
         x = node.data['x']
         l = node.data['label']
-        n1_v = node.data['n1_v']  # dist
-        n2_v = node.data['n2_v']  # group
-        n1_e = torch.sort(node.data['n1_e'], 1, descending=True)[0][:, 0: self.ajr].squeeze(2)
-        n2_e = torch.sort(node.data['n2_e'], 1, descending=True)[0][:, 0: self.m-1].squeeze(2)
+        # n1_v = node.data['n1_v']  # dist
+        # n2_v = node.data['n2_v']  # group
+        # n1_e = torch.sort(node.data['n1_e'], 1, descending=True)[0][:, 0: self.ajr].squeeze(2)
+        # n2_e = torch.sort(node.data['n2_e'], 1, descending=True)[0][:, 0: self.m-1].squeeze(2)
 
         n1_h = node.data['n1_h']
-        n1_w = node.data['n1_w']  # weight
-        h = self.activation(0
-                            + self.l0(x) * self.use_x
-                            + self.l1(l)
-                            + self.l2(n1_h)
-                            # + self.l3(n2_v)
-                            + self.t3(torch.sum(self.activation(self.t4(n1_w)), dim=1))
-                            # + self.l5(n2_e)
-                            )
+        n1_d = node.data['n1_d']  # reserved adjacent dist
+        n1_w = node.data['n1_w']  # reserved adjacent weight
+        n_d = node.data['n_d']  # all dist
+        n_w = node.data['n_w']  # all weight
 
+        if self.edge_info == 'adj_weight':
+            h = self.activation(self.l0(x) * self.use_x + self.l1(l) + self.l2(n1_h) + self.t3(torch.sum(self.activation(self.t4(n1_w)), dim=1)))
+        if self.edge_info == 'adj_dist':
+            h = self.activation(self.l0(x) * self.use_x + self.l1(l) + self.l2(n1_h) + self.t3(torch.sum(self.activation(self.t4(n1_d)), dim=1)))
+        if self.edge_info == 'all_weight':
+            h = self.activation(self.l0(x) * self.use_x + self.l1(l) + self.l2(n1_h) + self.t3(torch.sum(self.activation(self.t4(n_w)), dim=1)))
+        if self.edge_info == 'all_dist':
+            h = self.activation(self.l0(x) * self.use_x + self.l1(l) + self.l2(n1_h) + self.t3(torch.sum(self.activation(self.t4(n_d)), dim=1)))
         # h = self.activation(self.l0(x) + self.l1(l)
         #                     + self.l2(n1_v)
         #                     # + self.l3(n2_v)
@@ -488,9 +498,9 @@ class NodeApplyModule(nn.Module):
 
 
 class GCN(nn.Module):
-    def __init__(self, k, m, ajr, hidden_dim, activation, use_x=True):
+    def __init__(self, k, m, ajr, hidden_dim, activation, use_x=True, edge_info='adj_weight'):
         super(GCN, self).__init__()
-        self.apply_mod = NodeApplyModule(k, m, ajr, hidden_dim, activation, use_x=use_x)
+        self.apply_mod = NodeApplyModule(k, m, ajr, hidden_dim, activation, use_x=use_x, edge_info=edge_info)
 
     def forward(self, g, feature):
         g.ndata['h'] = feature
@@ -631,7 +641,7 @@ class PositionalEncoding(nn.Module):
 
 class DQNet(nn.Module):
     # TODO k, m, ajr should be excluded::no generalization
-    def __init__(self, k, m, ajr, num_head, hidden_dim, extended_h=False, use_x=True):
+    def __init__(self, k, m, ajr, num_head, hidden_dim, extended_h=False, use_x=True, edge_info='adj_weight'):
         super(DQNet, self).__init__()
         self.k = k
         self.m = m
@@ -643,7 +653,7 @@ class DQNet(nn.Module):
             self.hidden_dim += k
         self.value1 = nn.Linear(num_head*self.hidden_dim, hidden_dim//2)
         self.value2 = nn.Linear(hidden_dim//2, 1)
-        self.layers = nn.ModuleList([GCN(k, m, ajr, hidden_dim, F.relu, use_x=use_x)])
+        self.layers = nn.ModuleList([GCN(k, m, ajr, hidden_dim, F.relu, use_x=use_x, edge_info=edge_info)])
         self.MHA = MultiHeadedAttention(h=num_head
                            , d_model=num_head*self.hidden_dim
                            , dropout=0.0

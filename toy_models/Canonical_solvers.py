@@ -1,4 +1,4 @@
- from DQN import DQN, to_cuda, EpisodeHistory
+from DQN import DQN, to_cuda, EpisodeHistory
 from k_cut import *
 import numpy as np
 import torch

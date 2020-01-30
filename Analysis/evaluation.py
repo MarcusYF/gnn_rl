@@ -11,43 +11,48 @@ from tqdm import tqdm
 from toy_models.Qiter import vis_g
 from Analysis.episode_stats import test_summary
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 # folder = 'Models/dqn_0113_test_qstep/'
 # folder = 'Models/dqn_test_not_sample_batch_episode/'
-# folder = '/u/fy4bc/code/research/RL4CombOptm' + '/Models/dqn_0129_base/'
-folder = '/p/reinforcement/data/gnn_rl/model/dqn/' + 'dqn_5by6_0129_base' + '/'
+folder = '/p/reinforcement/data/gnn_rl/model/dqn/' + '/dqn_0129_adj_weight/'
+# folder = '/p/reinforcement/data/gnn_rl/model/dqn/' + 'dqn_0129_test_ajr' + '/'
+# folder = '/p/reinforcement/data/gnn_rl/model/dqn/' + 'dqn_5by6_0129_base_2' + '/'
 # folder = '/p/reinforcement/data/gnn_rl/model/dqn/' + 'dqn_10by10_0129_base' + '/'
 # folder = 'Models/dqn_0113_test_eps0/'
 # folder = 'Models/dqn_test_centroid_h16/'
-with open(folder + 'dqn_' + str(3000), 'rb') as model_file:
+# folder = '/p/reinforcement/data/gnn_rl/model/dqn/' + 'dqn_0129_all_weight' + '/'
+with open(folder + 'dqn_' + str(10000), 'rb') as model_file:
     alg = pickle.load(model_file)
 
-x = []
-for i in tqdm(range(alg.experience_replay_buffer2.__len__())):
-    # x.append(sum(alg.experience_replay_buffer[i].reward_seq))
-    x.append(alg.experience_replay_buffer2[0].r.item())
-sum(x) / alg.experience_replay_buffer2.__len__()
+alg.model.layers[0].apply_mod.l5.weight
 
+x = []
+for i in tqdm(range(alg1.experience_replay_buffer2.__len__())):
+    # x.append(sum(alg.experience_replay_buffer[i].reward_seq))
+    x.append(alg1.experience_replay_buffer2[i].r.item())
+sum(x) / alg1.replay_buffer_max_size
+
+# 3 by 3
+problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16, sample_episode=1000)
+test = test_summary(alg=alg, problem=problem, q_net='mlp')
+test.run_test(batch_size=1000, gnn_step=3, episode_len=50, explore_prob=0.0)
+test.show_result()
+# 5 by 6
 problem = KCut_DGL(k=5, m=6, adjacent_reserve=10, hidden_dim=32, sample_episode=200)
 test = test_summary(alg=alg, problem=problem, q_net='mlp')
 test.run_test(batch_size=200, gnn_step=3, episode_len=50, explore_prob=0.0)
 test.show_result()
+# 10 by 10
+problem = KCut_DGL(k=10, m=10, adjacent_reserve=20, hidden_dim=64, sample_episode=100)
+test = test_summary(alg=alg, problem=problem, q_net='mlp')
+test.run_test(batch_size=100, gnn_step=3, episode_len=50, explore_prob=0.0)
+test.show_result()
 # scp -r /u/fy4bc/code/research/RL4CombOptm/gnn_rl/Models/dqn_0113_test_eps0 fy4bc@128.143.69.125:/home/fy4bc/mnt/code/research/RL4CombOptm/MinimumVertexCover_DRL/Models/
-
-13.7886
-35.3720
-64.9265
-85.8639
-106.3571
-97.5171
-109.9404
-106.3062
-
 
 
 # plot Q-loss/Reward curve
-fig_name = 'return-base-21'
+fig_name = 'return-base56-1'
 
 ret = alg.log.get_log("tot_return")
 qv = alg.log.get_log("Q_error")
