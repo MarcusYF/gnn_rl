@@ -11,6 +11,7 @@ from tqdm import tqdm
 from supervised.parse_sample import data_handler, map_psar2g
 import argparse
 from torch.optim import lr_scheduler
+from torch.utils.tensorboard import SummaryWriter
 
 # python run.py --save_folder=sup_0123_vanilla --gpu=0 --q_net=mlp
 

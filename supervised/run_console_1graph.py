@@ -248,5 +248,6 @@ for g_i in tqdm(range(100)):  # choose which graph instance to learn
     ax.set_xlabel('States')
     ax.set_ylabel("L2 error of q-prediction")
     ax.set_title('Q value prediction error at different states')
+    plt.legend(loc="upper right")
     plt.savefig(path + '/supervised/figs/' + fig_name + '.png')
     plt.close()
