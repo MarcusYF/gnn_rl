@@ -29,7 +29,7 @@ folder = '/p/reinforcement/data/gnn_rl/model/dqn/' + 'dqn_3by3_0205_softdqn_10' 
 folder = '/p/reinforcement/data/gnn_rl/model/dqn/' + 'dqn_5by6_0205_softdqn2' + '/'
 folder = '/p/reinforcement/data/gnn_rl/model/dqn/' + 'dqn_5by6_0207_soft1' + '/'
 
-model_name = 'test2'
+model_name = 'dqn_5by6_0213_scaleR'
 folder = '/p/reinforcement/data/gnn_rl/model/dqn/'
 folder = folder + model_name + '/'
 with open(folder + 'dqn_' + str(10000), 'rb') as model_file:
@@ -146,14 +146,14 @@ for i in tqdm(range(alg.experience_replay_buffer.__len__())):
 sum(x) / alg.replay_buffer_max_size
 
 # 3 by 3
-problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16, mode='complete', sample_episode=1)
+problem = KCut_DGL(k=3, m=3, adjacent_reserve=5, hidden_dim=16, mode='complete', sample_episode=1000)
 test = test_summary(alg=alg, problem=problem, q_net='mlp')
-test.run_test(trial_num=1, batch_size=1, gnn_step=3, episode_len=50, explore_prob=0.0, Temperature=0.05)
+test.run_test(trial_num=10, batch_size=100, gnn_step=3, episode_len=50, explore_prob=0.0, Temperature=0.0000005)
 test.show_result()
 # 5 by 6
-problem = KCut_DGL(k=5, m=6, adjacent_reserve=10, hidden_dim=32, sample_episode=500)
+problem = KCut_DGL(k=5, m=6, adjacent_reserve=10, hidden_dim=32, sample_episode=100)
 test = test_summary(alg=alg, problem=problem, q_net='mlp')
-test.run_test(trial_num=5, batch_size=100, gnn_step=3, episode_len=50, explore_prob=0.0, Temperature=0.05)
+test.run_test(trial_num=1, batch_size=100, gnn_step=3, episode_len=50, explore_prob=0.0, Temperature=0.05)
 test.show_result()
 # 10 by 10
 problem = KCut_DGL(k=10, m=10, adjacent_reserve=20, hidden_dim=64, sample_episode=100)

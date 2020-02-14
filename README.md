@@ -20,6 +20,35 @@ Avg episode best value: 1.8567707288265227
 Avg step cost: 27.59
 Avg percentage max gain: 0.7339569123362257
 
+
+
+
+
+Greedy algorithm
+Running time
+soft-dqn(end)
+soft-dqn(best)
+Running time
+3 by 3
+40.5%
+0.42
+24.9%
+40.3%
+0.13
+5 by 6
+53.5%
+13.6
+52.4%
+54.6%
+0.18
+10 by 10
+67.2%
+726.0
+65.3%
+66.8%
+0.35
+
+
 # 10by10 check nan. 
 caused by numerical error in square_dist_matrix. Apply relu clip to avoid it. 
 Also be aware that a large density of nodes could be dangerous.

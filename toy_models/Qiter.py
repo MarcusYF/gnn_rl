@@ -24,18 +24,18 @@ def QtableKey2state(k):
 def vis_g(problem, name='test', topo='knn'):
     k = problem.k
     g = problem.g
-    X = g.ndata['x']
+    X = g.ndata['x'].cpu()
     n = X.shape[0]
-    label = g.ndata['label']
-    link = dc(g.edata['e_type'].view(n, n - 1, 2))
-    c = ['r', 'b', 'y']
+    label = g.ndata['label'].cpu()
+    link = dc(g.edata['e_type'].view(n, n - 1, 2).cpu())
+    # c = ['r', 'b', 'y']
     plt.cla()
-
+    c = ['r', 'b', 'y', 'k', 'g', 'c', 'm', 'tan', 'peru', 'pink']
     for i in range(k):
         a = X[(label[:, i] > 0).nonzero().squeeze()]
         if a.shape[0] > .5:
             a = a.view(-1, 2)
-            plt.scatter(a[:, 0], a[:, 1], s=60, c=c[i])
+            plt.scatter(a[:, 0], a[:, 1], s=60, c=[c[i]]*(n//k))
 
     for i in range(n):
         plt.annotate(str(i), xy=(X[i, 0], X[i, 1]))
@@ -50,7 +50,7 @@ def vis_g(problem, name='test', topo='knn'):
                     j_ = j + 1
                 plt.plot([X[i, 0], X[j_, 0]], [X[i, 1], X[j_, 1]], '-', color='k')
 
-    plt.savefig('./' + name + '.png')
+    plt.savefig(name + '.png')
     plt.close()
 
 if __name__ == '__main__':

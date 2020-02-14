@@ -261,9 +261,8 @@ class DQN:
                     batch_legal_actions = self.problem.get_legal_actions(state=bg, action_type=action_type).cuda()
                     _, _, _, Q_sa_next = self.model(dc(bg), batch_legal_actions, action_type=action_type, gnn_step=gnn_step,
                                                     time_aware=self.time_aware, remain_episode_len=episode_len - t - 1)
-                    # delta = Q_sa[best_actions] - (rewards + self.gamma * Q_sa_next.view(-1, num_actions).max(dim=1).values)
-                    delta = (Q_sa[best_actions] - (
-                                rewards + self.gamma * Q_sa_next.view(-1, num_actions).max(dim=1).values)) / (torch.clamp(torch.abs(Q_sa[best_actions]),0.1))
+                    delta = Q_sa[best_actions] - (rewards + self.gamma * Q_sa_next.view(-1, num_actions).max(dim=1).values)
+                    # delta = (Q_sa[best_actions] - (rewards + self.gamma * Q_sa_next.view(-1, num_actions).max(dim=1).values)) / (torch.clamp(torch.abs(Q_sa[best_actions]),0.1))
                     self.cascade_replay_buffer_weight[t, :batch_size] = torch.abs(delta.detach())
             R = [reward.item() for reward in rewards]
             sum_r += sum(R)
@@ -315,10 +314,18 @@ class DQN:
         _, rewards = self.problem.step_batch(states=bg, action=actions)
         g1 = [g for g in dgl.unbatch(dc(bg))]  # after_state
 
+        rewards_ = rewards.reshape(self.buf_epi_len, -1)
+        posi_r = rewards_ >= 0
+        nege_r = rewards_ < 0
+        scaled_rewards = (rewards_-torch.mean(rewards_, dim=1).t().unsqueeze(1)) / torch.std(rewards_, dim=1).t().unsqueeze(1)
+        scaled_rewards = scaled_rewards * posi_r + rewards_ * nege_r
+
+        scaled_rewards = scaled_rewards.view(-1)
+
         [self.cascade_replay_buffer[i].extend(
             [sars(g0[j+i*self.new_epi_batch_size]
             , actions[j+i*self.new_epi_batch_size]
-            , rewards[j+i*self.new_epi_batch_size]
+            , scaled_rewards[j+i*self.new_epi_batch_size]
             , g1[j+i*self.new_epi_batch_size])
             for j in range(self.new_epi_batch_size)])
          for i in range(self.buf_epi_len)]
@@ -328,8 +335,8 @@ class DQN:
             batch_legal_actions = self.problem.get_legal_actions(state=bg, action_type=action_type).cuda()
             _, _, _, Q_sa_next = self.model(dc(bg), batch_legal_actions, action_type=action_type, gnn_step=gnn_step)
 
-            # delta = Q_sa[chosen_actions] - (rewards + self.gamma * Q_sa_next.view(-1, num_actions).max(dim=1).values)
-            delta = (Q_sa[chosen_actions] - (rewards + self.gamma * Q_sa_next.view(-1, num_actions).max(dim=1).values)) / torch.clamp(torch.abs(Q_sa[chosen_actions]),0.1)
+            delta = Q_sa[chosen_actions] - (rewards + self.gamma * Q_sa_next.view(-1, num_actions).max(dim=1).values)
+            # delta = (Q_sa[chosen_actions] - (rewards + self.gamma * Q_sa_next.view(-1, num_actions).max(dim=1).values)) / torch.clamp(torch.abs(Q_sa[chosen_actions]),0.1)
             self.cascade_replay_buffer_weight = torch.cat([self.cascade_replay_buffer_weight, torch.abs(delta.detach().cpu().view(self.buf_epi_len, self.new_epi_batch_size))], dim=1).detach()
             # print(self.cascade_replay_buffer_weight)
         R = [reward.item() for reward in rewards]
@@ -416,8 +423,8 @@ class DQN:
         # q = self.gamma ** q_step * Q_s2a.view(-1, action_num).max(dim=1).values - Q_s1a_
         if self.priority_sampling:
             # print(self.cascade_replay_buffer_weight.view(-1)[selected_indices])
-            # self.cascade_replay_buffer_weight.flatten()[selected_indices] = torch.abs(q).cpu()
-            self.cascade_replay_buffer_weight.flatten()[selected_indices] = torch.abs(q / torch.clamp(torch.abs(Q_s1a_),0.1)).cpu()
+            self.cascade_replay_buffer_weight.flatten()[selected_indices] = torch.abs(q).cpu()
+            # self.cascade_replay_buffer_weight.flatten()[selected_indices] = torch.abs(q / torch.clamp(torch.abs(Q_s1a_),0.1)).cpu()
             print(self.cascade_replay_buffer_weight.flatten()[selected_indices])
 
         Q = q.unsqueeze(0)
