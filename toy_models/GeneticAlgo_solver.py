@@ -1,7 +1,14 @@
+"""Strict GA Task
+"""
+import numpy as np
+from toy_models.ga_helpers import strict_genetic_algorithm as ga
+from toy_models.ga_helpers import calcs
+from toy_models.ga_helpers import data_loader
+from toy_models.ga_helpers import utils
+from toy_models.ga_helpers import corr_score
 
 
-
-def run(config: config_loader.ColocationConfig):
+def run(config: data_loader.ColocationConfig):
     """run a strict Genetic optimizer
 
     Args:
@@ -11,13 +18,13 @@ def run(config: config_loader.ColocationConfig):
         best fitness (float), accuracy of best solution, cache
     """
     # Prepare cache
-    cache = cache_dict.get_cache(config)
+    cache = utils.get_cache(config)
 
     # Prepare verbose print function
-    vprint = printing.compile_vprint_function(config.verbose)
+    vprint = utils.printing.compile_vprint_function(config.verbose)
 
     # Load matrix
-    corr_matrix = matrix_loader.load_matrix(config.corr_matrix_path)
+    corr_matrix = data_loader.load_matrix(config.corr_matrix_path)
 
     # Compile functions
     corr_func = corr_score.compile_solution_func(corr_matrix, config.type_count)
@@ -66,12 +73,12 @@ def run(config: config_loader.ColocationConfig):
             config.mutation_rate,
             weight_func=weight_func)
 
-    g_t = ground_truth(population[0])
+    g_t = ga.ground_truth(population[0])
     fit: np.ndarray = ga.fitness(np.array([g_t], dtype=np.int32), corr_func)
 
     recalls = []
     for i in range(len(population)):
-        recalls.append(cal_acc(population[i]))
+        recalls.append(ga.cal_acc(population[i]))
     recalls = np.array(recalls)
 
     ids = np.argsort(fitnesses)
