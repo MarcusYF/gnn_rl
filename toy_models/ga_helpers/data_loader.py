@@ -25,12 +25,12 @@ class ColocationConfig:
     total_room_count: int = 51
     total_type_count: int = 4
     selected_rooms: List[int] = dataclasses.field(default_factory=list)
-    room_count: int = 51
+    room_count: int = 5
     type_count: int = 4
-    population_count: int = 300
+    population_count: int = 30
     replaced_count: int = 150
     survivor_count: int = 20
-    max_iteration: int = 5000
+    max_iteration: int = 500
     crossing_over_rate: float = 0.0
     mutation_rate: float = 0.001
     mutation_weighted: bool = False

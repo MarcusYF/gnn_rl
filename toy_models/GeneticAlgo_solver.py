@@ -1,11 +1,14 @@
 """Strict GA Task
 """
+import os, sys
+sys.path.append(os.path.abspath(os.path.join(os.getcwd(), "..")))
 import numpy as np
 from toy_models.ga_helpers import strict_genetic_algorithm as ga
 from toy_models.ga_helpers import calcs
 from toy_models.ga_helpers import data_loader
 from toy_models.ga_helpers import utils
-from toy_models.ga_helpers import corr_score
+import corr_score.c_score_func
+from . import corr_score
 
 
 def run(config: data_loader.ColocationConfig):
@@ -91,3 +94,34 @@ def run(config: data_loader.ColocationConfig):
         print(best_solution)
 
     return best_solution, calcs.calculate_accuracy(best_solution), cache, fit[0], best_fitness
+
+
+def ga(path_m, path_c):
+    """Running colocation solver
+    """
+    #config = arg_parser.parse_args()
+    config = utils.my_parse_args(['-m', path_m, '-c', path_c])
+    print(config)
+
+    # Process the configuration
+    utils.create_dir(config.base_file_name)
+    profiler = utils.Profiler(config)
+    np.random.seed(config.seed)
+
+    profiler.start()
+    best_solution, acc, cache, ground_truth_fitness, best_fitness = run(config)
+    profiler.stop()
+
+    if config.visualize:
+        utils.plot_cache(cache, config)
+
+    profiler.print_results()
+
+    return best_solution, acc, ground_truth_fitness, best_fitness
+
+
+if __name__ == '__main__':
+    path_m = os.path.abspath(os.path.join(os.getcwd())) + '/ga_helpers/corr_mat/corr8.mat'
+
+    path_c = os.path.abspath(os.path.join(os.getcwd())) + '/ga_helpers/configs/default.json'
+    ga(path_m, path_c)

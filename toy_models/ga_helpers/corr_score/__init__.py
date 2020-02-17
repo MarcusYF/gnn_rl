@@ -1,8 +1,8 @@
 """Some cython functions that speed up the computation
 """
 import numpy as np
-from . import c_score_func
-
+import toy_models.ga_helpers.corr_score.c_score_func
+# from toy_models.ga_helpers.corr_score.c_score_func import *
 
 def compile_room_func(corr_matrix, type_count):
     """Compile a room corr score function
