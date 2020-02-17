@@ -132,16 +132,19 @@ class test_summary:
         x = [bs * np.argmax(episode_max_gain_ratios[i::bs]) for i in range(bs)]
         select_indices = [x[i] + i for i in range(bs)]
         episode_max_gains = []
+        episode_max_gain_steps = []
         episode_max_gain_ratios = []
         for i in select_indices:
             initial_S.append(self.S[i].item())
             episode_gains.append(self.S[i].item() - sum(self.episodes[i].reward_seq))
             episode_max_gains.append(self.S[i].item() - max(max(np.cumsum(self.episodes[i].reward_seq)), 0))
+            episode_max_gain_steps.append(np.argmax(np.cumsum(self.episodes[i].reward_seq)) + 1)
             episode_gain_ratios.append(episode_gains[-1] / self.S[i].item())
             episode_max_gain_ratios.append(max(episode_max_gains[-1], 0) / self.S[i].item())
         print('Avg value of initial S:', np.mean(self.S))
         print('Avg episode end value:', np.mean(episode_gains))
         print('Avg episode best value:', np.mean(episode_max_gains))
+        print('Avg episode step budget(Avg/Max/Min):', np.mean(episode_max_gain_steps), np.max(episode_max_gain_steps), np.min(episode_max_gain_steps))
         # print('Avg max gain budget:', np.mean(self.max_gain_budget))
         # print('Var max gain budget:', np.std(self.max_gain_budget))
         print('Avg percentage episode gain:', 1 - self.trial_num * sum(episode_gains) / sum(self.S).item())  #np.mean(episode_gain_ratios))

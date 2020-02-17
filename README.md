@@ -2,19 +2,25 @@
 works. for 3by3, max gain ratio ~ 40%, while random guess44%/greedy 55%/optimal 56%
                  max gain ratio ~ 32%, while random guess27%/greedy 41%/optimal 42%
 
-10 by 10 complete
+10 by 10 
+--complete
 Avg value of initial S: 234.7038572692871
 Avg episode best value: 77.02441688537597
 Avg step cost: 56.38
 Avg percentage max gain: 0.6718229611497091
+--incomplete
+Avg value of initial S: 17.95418667793274
+Avg episode best value: 2.1257452952861784
+Avg step cost: 98.96
+Avg percentage max gain: 0.8816016936094965
 
-5 by 6 complete
+5 by 6 
+--complete
 Avg value of initial S: 39.173927841186526
 Avg episode best value: 18.204591732025147
 Avg step cost: 11.88
 Avg percentage max gain: 0.5352880669554592
-
-5 by 6 incomplete
+--incomplete
 Avg value of initial S: 6.979210567474365
 Avg episode best value: 1.8567707288265227
 Avg step cost: 27.59

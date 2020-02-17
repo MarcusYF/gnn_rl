@@ -314,18 +314,18 @@ class DQN:
         _, rewards = self.problem.step_batch(states=bg, action=actions)
         g1 = [g for g in dgl.unbatch(dc(bg))]  # after_state
 
-        rewards_ = rewards.reshape(self.buf_epi_len, -1)
-        posi_r = rewards_ >= 0
-        nege_r = rewards_ < 0
-        scaled_rewards = (rewards_-torch.mean(rewards_, dim=1).t().unsqueeze(1)) / torch.std(rewards_, dim=1).t().unsqueeze(1)
-        scaled_rewards = scaled_rewards * posi_r + rewards_ * nege_r
-
-        scaled_rewards = scaled_rewards.view(-1)
+        # rewards_ = rewards.reshape(self.buf_epi_len, -1)
+        # posi_r = rewards_ >= 0
+        # nege_r = rewards_ < 0
+        # scaled_rewards = (rewards_-torch.mean(rewards_, dim=1).t().unsqueeze(1)) / torch.std(rewards_, dim=1).t().unsqueeze(1)
+        # scaled_rewards = scaled_rewards * posi_r + rewards_ * nege_r
+        #
+        # scaled_rewards = scaled_rewards.view(-1)
 
         [self.cascade_replay_buffer[i].extend(
             [sars(g0[j+i*self.new_epi_batch_size]
             , actions[j+i*self.new_epi_batch_size]
-            , scaled_rewards[j+i*self.new_epi_batch_size]
+            , rewards[j+i*self.new_epi_batch_size]
             , g1[j+i*self.new_epi_batch_size])
             for j in range(self.new_epi_batch_size)])
          for i in range(self.buf_epi_len)]

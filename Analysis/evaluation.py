@@ -6,8 +6,9 @@ import torch
 import os
 from tqdm import tqdm
 from Analysis.episode_stats import test_summary
+from torch.nn import DataParallel
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3'
 
 # folder = 'Models/dqn_0113_test_qstep/'
 # folder = 'Models/dqn_test_not_sample_batch_episode/'
@@ -29,12 +30,12 @@ folder = '/p/reinforcement/data/gnn_rl/model/dqn/' + 'dqn_3by3_0205_softdqn_10' 
 folder = '/p/reinforcement/data/gnn_rl/model/dqn/' + 'dqn_5by6_0205_softdqn2' + '/'
 folder = '/p/reinforcement/data/gnn_rl/model/dqn/' + 'dqn_5by6_0207_soft1' + '/'
 
-model_name = 'dqn_5by6_0213_scaleR'
+model_name = 'dqn_5by6_0214_in_base'
 folder = '/p/reinforcement/data/gnn_rl/model/dqn/'
 folder = folder + model_name + '/'
-with open(folder + 'dqn_' + str(10000), 'rb') as model_file:
+with open(folder + 'dqn_' + str(100000), 'rb') as model_file:
     alg = pickle.load(model_file)
-with open(folder + 'dqn_' + str(10000), 'rb') as model_file:
+with open(folder + 'dqn_' + str(50000), 'rb') as model_file:
     alg1 = pickle.load(model_file)
 with open(folder + 'dqn_' + str(4000), 'rb') as model_file:
     alg2 = pickle.load(model_file)
@@ -151,12 +152,12 @@ test = test_summary(alg=alg, problem=problem, q_net='mlp')
 test.run_test(trial_num=10, batch_size=100, gnn_step=3, episode_len=50, explore_prob=0.0, Temperature=0.0000005)
 test.show_result()
 # 5 by 6
-problem = KCut_DGL(k=5, m=6, adjacent_reserve=10, hidden_dim=32, sample_episode=100)
-test = test_summary(alg=alg, problem=problem, q_net='mlp')
-test.run_test(trial_num=1, batch_size=100, gnn_step=3, episode_len=50, explore_prob=0.0, Temperature=0.05)
+problem = KCut_DGL(k=5, m=6, adjacent_reserve=10, hidden_dim=32, mode='incomplete', sample_episode=500)
+test = test_summary(alg=alg1, problem=problem, q_net='mlp')
+test.run_test(trial_num=5, batch_size=100, gnn_step=3, episode_len=50, explore_prob=0.0, Temperature=0.05)
 test.show_result()
 # 10 by 10
-problem = KCut_DGL(k=10, m=10, adjacent_reserve=20, hidden_dim=64, sample_episode=100)
+problem = KCut_DGL(k=10, m=10, adjacent_reserve=20, hidden_dim=64, mode='complete', sample_episode=100)
 test = test_summary(alg=alg, problem=problem, q_net='mlp')
 test.run_test(trial_num=10, batch_size=10, gnn_step=3, episode_len=200, explore_prob=0.0, Temperature=0.05)
 test.show_result()
@@ -239,7 +240,7 @@ plt.close()
 
 # scp -r fy4bc@128.143.69.125:/home/fy4bc/mnt/code/research/RL4CombOptm/MinimumVertexCover_DRL/Data/qiter33 /u/fy4bc/code/research/RL4CombOptm/gnn_rl/Data
 
-
+scp -r /Users/yaofan29597/Desktop/UVA/research/Hongning/code/MinimumVertexCover_DRL/GeneticAlgorithm.rar fan@128.143.69.32:/home/fan/Desktop/project/gnn_rl
 path = '/p/reinforcement/data/gnn_rl/model/dqn/dqn_10by10_test_nan/'
 
 with open(path + 'dqn_nan_debug', 'rb') as model_file:

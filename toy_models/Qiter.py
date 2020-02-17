@@ -40,15 +40,20 @@ def vis_g(problem, name='test', topo='knn'):
     for i in range(n):
         plt.annotate(str(i), xy=(X[i, 0], X[i, 1]))
         for j in range(n - 1):
-            if topo=='knn':
-                topo = 0
-            else:
-                topo = 1
-            if link[i, j][topo].item() == 1:
+            if link[i, j][0].item() == 1:
                 j_ = j
                 if j >= i:
                     j_ = j + 1
-                plt.plot([X[i, 0], X[j_, 0]], [X[i, 1], X[j_, 1]], '-', color='k')
+                plt.plot([X[i, 0], X[j_, 0]], [X[i, 1], X[j_, 1]], ':', color='k')
+
+        if topo == 'cut':
+            for j in range(n - 1):
+                if link[i, j][1].item() + link[i, j][0].item() > 1.5:
+                    j_ = j
+                    if j >= i:
+                        j_ = j + 1
+                    plt.plot([X[i, 0], X[j_, 0]], [X[i, 1], X[j_, 1]], '-', color='k')
+
 
     plt.savefig(name + '.png')
     plt.close()
