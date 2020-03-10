@@ -1,32 +1,48 @@
 """A genetic algorithm that strictly ensure every individual is valid.
 """
 import numpy as np
+import itertools
+import torch
 from toy_models.ga_helpers import calcs
 
 
-def mutate_by_swap_weighted(population, child_id, mutation_rate, weights):
+def mutate_by_swap_weighted(population, child_id, mutation_rate, weights, manner='fix_type'):
     """Perform mutation by randomly swapping pairs of rooms within a type.
     """
     solution = population[child_id]
     room_count, type_count = solution.shape
-    pair_count = np.random.poisson(mutation_rate * room_count / 2, type_count)
-    pair_count = np.clip(pair_count, 0, room_count / 2).astype(int)
 
-    sequence = np.arange(0, room_count)
+    if manner == 'fix_type':
+        pair_count = np.random.poisson(mutation_rate * room_count / 2, type_count)
+        pair_count = np.clip(pair_count, 0, room_count / 2).astype(int)
 
-    for type_id, count in enumerate(pair_count):
-        if count == 0:
-            continue
-        ids = np.random.choice(sequence, count * 2, replace=False, p=weights)
-        swap_i, swap_j = ids[:count], ids[count:]
-        solution[swap_i, type_id] ^= solution[swap_j, type_id]
-        solution[swap_j, type_id] ^= solution[swap_i, type_id]
-        solution[swap_i, type_id] ^= solution[swap_j, type_id]
+        sequence = np.arange(0, room_count)
+
+        for type_id, count in enumerate(pair_count):
+            if count == 0:
+                continue
+            ids = np.random.choice(sequence, count * 2, replace=False, p=weights)
+            swap_i, swap_j = ids[:count], ids[count:]
+            solution[swap_i, type_id] ^= solution[swap_j, type_id]
+            solution[swap_j, type_id] ^= solution[swap_i, type_id]
+            solution[swap_i, type_id] ^= solution[swap_j, type_id]
+    else:
+        pair_count = np.random.poisson(mutation_rate * room_count * type_count)
+        for i in range(pair_count):
+            swap_rooms = np.random.choice(range(room_count), 2, replace=False)
+            swap_types = np.random.choice(range(type_count), 2, replace=True)
+            solution[swap_rooms[0], swap_types[0]] ^= solution[swap_rooms[1], swap_types[1]]
+            solution[swap_rooms[1], swap_types[1]] ^= solution[swap_rooms[0], swap_types[0]]
+            solution[swap_rooms[0], swap_types[0]] ^= solution[swap_rooms[1], swap_types[1]]
 
     return solution
 
 
-def crossing_over(population, child_id, father_id, crossing_over_rate):
+def helper_f1(a, cluster, i):
+    a[cluster] += 2 ** i + np.random.rand(len(cluster))/100
+
+
+def crossing_over(population, child_id, father_id, crossing_over_rate, manner='fix_type'):
     """Performing crossing over on two solutions, modifying the first one
 
     When $T$ types are present, manipulating $T - 1$ is sufficient.
@@ -34,11 +50,29 @@ def crossing_over(population, child_id, father_id, crossing_over_rate):
     """
     child = population[child_id]
     father = population[father_id]
-    type_count = child.shape[1]
-    should_cross = np.random.rand(type_count - 1) < crossing_over_rate
-    for type_id in range(1, type_count):
-        if should_cross[type_id - 1]:
-            child[:, type_id] = father[:, type_id]
+    room_count, type_count = child.shape[0], child.shape[1]
+
+    if manner == 'fix_type':
+        should_cross = np.random.rand(type_count - 1) < crossing_over_rate
+
+        for type_id in range(1, type_count):
+            if should_cross[type_id - 1]:
+                child[:, type_id] = father[:, type_id]
+    else:
+        c = np.zeros(room_count * type_count)
+        f = np.zeros(room_count * type_count)
+        # print('mother', child)
+        # print('father', father)
+
+        [helper_f1(c, cluster, i) for i, cluster in enumerate(child)]
+
+        [helper_f1(f, cluster, i) for i, cluster in enumerate(father)]
+        population[child_id] = np.argsort(c + f).reshape(room_count, type_count)
+
+        # print(population[child_id])
+
+
+
 
 
 def initialize_population(population_size, room_count, type_count):
@@ -83,9 +117,11 @@ def suvival_of_fittest(fitnesses, survivor_count, replaced_count):
 
 
 def next_gen(population, survivor_ids, loser_ids, crossing_over_rate,
-             mutation_rate, weight_func):
+             mutation_rate, weight_func, manner='fix_type'):
     """Generate the next generation (in place)
     """
+    # print('survivor_ids', survivor_ids)
+    # print('loser_ids', loser_ids)
     loser_count = len(loser_ids)
     mothers = np.random.choice(survivor_ids, size=loser_count)
     fathers = np.random.choice(survivor_ids, size=loser_count)
@@ -95,7 +131,7 @@ def next_gen(population, survivor_ids, loser_ids, crossing_over_rate,
         population[l_id] = population[m_id]
 
         if f_id != m_id:
-            crossing_over(population, l_id, f_id, crossing_over_rate)
+            crossing_over(population, l_id, f_id, crossing_over_rate, manner=manner)
 
         weights = None
         if weight_func is not None:
@@ -106,6 +142,6 @@ def next_gen(population, survivor_ids, loser_ids, crossing_over_rate,
                 f_room[r_id] = weight_func(room)
             weights = calcs.sum_normalize(0 - f_room, axis=0)
 
-        mutate_by_swap_weighted(population, l_id, mutation_rate, weights)
+        mutate_by_swap_weighted(population, l_id, mutation_rate, weights, manner=manner)
 
     return population

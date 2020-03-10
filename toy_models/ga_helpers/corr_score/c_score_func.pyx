@@ -1,6 +1,6 @@
 """Calculate correlational coefficient efficiently
 """
-
+import numpy as np
 from cython.parallel import parallel, prange
 from libc.stdlib cimport abort, malloc, free
 cimport cython
@@ -25,7 +25,7 @@ cdef double c_room_mean_4(double[:, :] corr_matrix, int[:] room) nogil:
 cdef double c_room_mean_generic(double[:, :] corr_matrix, int[:] room) nogil:
     """Fast calculating room's mean"""
     cdef double sum = 0
-    cdef int count = 1
+    cdef int count = 0
     cdef int type_count = room.shape[0]
     cdef int i, j, room_i, room_j
     for i in range(type_count - 1):
@@ -99,3 +99,32 @@ cpdef solution_mean_generic(double[:, :] corr_matrix, int[:, :] solution):
     return c_solution_mean_generic(corr_matrix, solution)
 
 
+def compile_room_func(corr_matrix, type_count):
+    """Compile a room corr score function
+    """
+    mean_func = {
+        4: room_mean_4,
+    }.get(type_count, room_mean_generic)
+
+    def wrapper(room):
+        """Wrapper for a mean correlational score function.
+        """
+        return mean_func(corr_matrix, room.astype(np.int32))
+
+    return wrapper
+
+
+def compile_solution_func(corr_matrix, type_count):
+    """Compile a room corr score function
+    """
+    mean_func = {
+        4: solution_mean_4,
+    }.get(type_count, solution_mean_generic)
+
+    def wrapper(solution):
+        """Wrapper for a mean correlational score function.
+        """
+        score = mean_func(corr_matrix, solution.astype(np.int32))
+        return score
+
+    return wrapper

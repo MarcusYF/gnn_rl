@@ -42,6 +42,7 @@ with open(folder + 'dqn_' + str(4000), 'rb') as model_file:
 with open(folder + 'dqn_' + str(8000), 'rb') as model_file:
     alg3 = pickle.load(model_file)
 
+
 # PER state distribution check
 ckpt = 10000
 with open('/p/reinforcement/data/gnn_rl/model/dqn/test3/buffer_' + str(ckpt), 'rb') as model_file:
@@ -124,6 +125,32 @@ plt.legend(loc="lower left")
 plt.savefig(path + '/supervised/case_study/state_distr/' + fig_name + '.png')
 plt.close()
 
+
+n, bins, patches = plt.hist(x=subopt_Vs, bins='auto', color='b',
+                            alpha=0.7, rwidth=0.85)
+n, bins, patches = plt.hist(x=opt_Vs, bins='auto', color='r',
+                            alpha=0.7, rwidth=0.85)
+plt.grid(axis='y', alpha=0.75)
+plt.xlabel('V(S)')
+plt.ylabel('Frequency')
+plt.title('state value distr. at opt. and subopt.')
+plt.legend(['V(S) at subopt.', 'V(S) at opt.'], loc='upper right')
+plt.text(23, 45, r'$\mu=15, b=3$')
+plt.savefig(path + '/supervised/case_study/state_distr/' + 'hist_opt_q' + '.png')
+plt.close()
+
+a = torch.sort(torch.tensor(opt_Vs))[0]
+b = torch.tensor(subopt_Vs)[torch.sort(torch.tensor(opt_Vs))[1]]
+
+plt.plot(b, color='b')
+plt.plot(a, color='r')
+plt.xlabel('problem instance i')
+plt.ylabel('V(s)')
+plt.title('V(S_opt) and V(S_subopt)')
+plt.legend(['V(s) at subopt.', 'V(s) at opt.'], loc='upper left')
+plt.text(23, 45, r'$\mu=15, b=3$')
+plt.savefig(path + '/supervised/case_study/state_distr/' + 'opt_subopt_q' + '.png')
+plt.close()
 
 n, bins, patches = plt.hist(x=s_collection, bins='auto', color='b',
                             alpha=0.7, rwidth=0.85)

@@ -2,6 +2,19 @@
 works. for 3by3, max gain ratio ~ 40%, while random guess44%/greedy 55%/optimal 56%
                  max gain ratio ~ 32%, while random guess27%/greedy 41%/optimal 42%
 
+running validation benchmark
+Reward shaping.
+why behave like greedy? maybe we should not have negative reward,
+and the reward close to the optimal should be amplified.
+what exactly is the influence of gamma. Seems like gamma=1 is ok. 
+potential function V(S) to help to reshape R. why the agent always underestimate the Q?
+
+Action pruning.
+
+State-action encoding.
+ 
+
+
 10 by 10 
 --complete
 Avg value of initial S: 234.7038572692871
@@ -26,7 +39,18 @@ Avg episode best value: 1.8567707288265227
 Avg step cost: 27.59
 Avg percentage max gain: 0.7339569123362257
 
-
+3by3
+--complete
+Avg value of initial S: 4.7138877820968625
+Avg episode best value: 2.8001146948337556
+Avg step cost: 2.11                                                                                                                                                          
+Avg percentage max gain: 0.40598613622741136     
+--incomplete
+Avg value of  initial S: 2.17603048130318
+Avg episode best value: 1.0029113071936149
+Avg step cost: 2.197530864197531
+Avg percentage max gain: 0.5391097156906589
+ 
 
 
 

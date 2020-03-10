@@ -22,6 +22,7 @@ def QtableKey2state(k):
     return [int(x) for x in k.split(',')]
 
 def vis_g(problem, name='test', topo='knn'):
+    plt.figure()
     k = problem.k
     g = problem.g
     X = g.ndata['x'].cpu()

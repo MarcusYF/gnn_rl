@@ -5,7 +5,7 @@ Created on Sat Mar  2 16:30:53 2019
 @author: fy4bc
 """
 
-from DQN import DQN
+from DQN import DQN, to_cuda
 from k_cut import *
 import argparse
 import numpy as np
@@ -14,9 +14,10 @@ import os
 import pickle
 from tqdm import tqdm
 import json
-import math
+from Analysis.episode_stats import test_summary
 from torch.utils.tensorboard import SummaryWriter
 
+print('new job..')
 # ensure reproducibility
 # np.random.seed(0)
 # torch.manual_seed(0)
@@ -40,15 +41,15 @@ def latestModelVersion(file):
 # python run.py --gpu=1 --save_folder=dqn_0124_test_fix_target_0
 # args
 parser = argparse.ArgumentParser(description="GNN with RL")
-parser.add_argument('--save_folder', default='dqn_5by6_0217_in_base2')
+parser.add_argument('--save_folder', default='dqn_3by3_0310_test')
 parser.add_argument('--gpu', default='0', help="")
 parser.add_argument('--resume', default=False)
-parser.add_argument('--problem_mode', default='incomplete', help="")
+parser.add_argument('--problem_mode', default='complete', help="")
 parser.add_argument('--readout', default='mlp', help="")
 parser.add_argument('--action_type', default='swap', help="")
-parser.add_argument('--k', default=5, help="size of K-cut")
-parser.add_argument('--m', default=6, help="cluster size")
-parser.add_argument('--ajr', default=10, help="")
+parser.add_argument('--k', default=3, help="size of K-cut")
+parser.add_argument('--m', default=3, help="cluster size")
+parser.add_argument('--ajr', default=8, help="")
 parser.add_argument('--h', default=32, help="hidden dimension")
 parser.add_argument('--extend_h', default=True)
 parser.add_argument('--use_x', default=0)
@@ -58,19 +59,20 @@ parser.add_argument('--explore_method', default='epsilon_greedy')
 parser.add_argument('--priority_sampling', default=0)
 parser.add_argument('--time_aware', default=False)
 parser.add_argument('--a', default=1, help="")
-parser.add_argument('--gamma', type=float, default=0.9, help="")
+parser.add_argument('--gamma', type=float, default=0.90, help="")
 parser.add_argument('--eps0', type=float, default=0.5, help="")
 parser.add_argument('--eps', type=float, default=0.1, help="")
-parser.add_argument('--explore_end_at', type=float, default=0.4, help="")
+parser.add_argument('--explore_end_at', type=float, default=0.2, help="")
 parser.add_argument('--lr', type=float, default=0.001, help="learning rate")
-parser.add_argument('--n_epoch', default=100000)
-parser.add_argument('--save_ckpt_step', default=50000)
+parser.add_argument('--action_dropout', type=float, default=1.0)
+parser.add_argument('--n_epoch', default=50000)
+parser.add_argument('--save_ckpt_step', default=20000)
 parser.add_argument('--target_update_step', default=5)
 parser.add_argument('--replay_buffer_size', default=5000, help="")
-parser.add_argument('--batch_size', default=200, help='')
+parser.add_argument('--batch_size', default=500, help='')
 parser.add_argument('--grad_accum', default=1, help='')
 parser.add_argument('--sample_batch_episode', type=int, default=0, help='')  # 0 for cascade sampling and 1 for batch episode sampling
-parser.add_argument('--n_episode', default=4, help='')
+parser.add_argument('--n_episode', default=10, help='')
 parser.add_argument('--episode_len', default=50, help='')
 parser.add_argument('--gnn_step', default=3, help='')
 parser.add_argument('--q_step', default=1)
@@ -97,12 +99,14 @@ time_aware = bool(args['time_aware'])
 a = int(args['a'])
 gamma = float(args['gamma'])
 lr = args['lr']    # learning rate
+action_dropout = args['action_dropout']    # learning rate
 replay_buffer_size = int(args['replay_buffer_size'])
 target_update_step = int(args['target_update_step'])
 batch_size = int(args['batch_size'])
 grad_accum = int(args['grad_accum'])
 sample_batch_episode = bool(args['sample_batch_episode'])
 n_episode = int(args['n_episode'])
+test_episode = 100
 episode_len = int(args['episode_len'])
 gnn_step = int(args['gnn_step'])
 q_step = int(args['q_step'])
@@ -123,12 +127,13 @@ if not os.path.exists(path):
 
 
 problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h, mode=problem_mode, sample_episode=n_episode)
+test_problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h, mode=problem_mode, sample_episode=test_episode)
 
 # model to be trained
 if not resume:
     model_version = 0
     alg = DQN(problem, action_type=action_type
-              , gamma=gamma, eps=.1, lr=lr
+              , gamma=gamma, eps=.1, lr=lr, action_dropout=action_dropout
               , sample_batch_episode=sample_batch_episode
               , replay_buffer_max_size=replay_buffer_size
               , epi_len=episode_len
@@ -161,8 +166,29 @@ with open(path + 'params', mode) as params_file:
     params_file.write('\n------------------------------------\n')
 
 
+# load validation set
+with open('/p/reinforcement/data/gnn_rl/model/test_data/3by3/0', 'rb') as valid_file:
+    validation_problem0 = pickle.load(valid_file)
+with open('/p/reinforcement/data/gnn_rl/model/test_data/3by3/1', 'rb') as valid_file:
+    validation_problem1 = pickle.load(valid_file)
+bg_hard = to_cuda(dgl.batch([p[0].g for p in validation_problem0[:test_episode]]))
+bg_easy = to_cuda(dgl.batch([p[0].g for p in validation_problem1[:test_episode]]))
+
+bg_subopt = []
+for i in range(test_episode):
+    gi = to_cuda(validation_problem0[:test_episode][i][0].g)
+    problem.reset_label(g=gi, label=validation_problem0[:test_episode][i][2])
+    bg_subopt.append(gi)
+bg_subopt = dgl.batch(bg_subopt)
+
+if ajr == 8:
+    bg_hard.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_hard.batch_size)
+    bg_easy.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_easy.batch_size)
+    bg_subopt.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_subopt.batch_size)
+
+
 def run_dqn(alg):
-    # Gamma = [0.5, 0.7, 0.8, 0.85, 0.9, 0.95, 0.98, 0.99, 0.995, 0.999]
+
     t = 0
     writer = SummaryWriter('runs/' + save_folder)
     for n_iter in tqdm(range(n_epoch)):
@@ -193,22 +219,44 @@ def run_dqn(alg):
         if n_iter % save_ckpt_step == save_ckpt_step - 1:
             with open(path + 'dqn_'+str(model_version + n_iter + 1), 'wb') as model_file:
                 pickle.dump(alg.model, model_file)
-            # alg.gamma = Gamma[t]
             t += 1
-                # pickle.dump([alg.model
-                #             , alg.log.get_log("tot_return")
-                #             , alg.log.get_log("Q_error")
-                #             , alg.cascade_replay_buffer_weight]
-                #             , model_file)
-            with open(path + 'buffer_' + str(model_version + n_iter + 1), 'wb') as model_file:
-                pickle.dump([alg.cascade_replay_buffer_weight, [[problem.calc_S(g=elem.s0) for elem in alg.cascade_replay_buffer[i]] for i in range(len(alg.cascade_replay_buffer))]]
-                             , model_file)
+            # with open(path + 'buffer_' + str(model_version + n_iter + 1), 'wb') as model_file:
+            #     pickle.dump([alg.cascade_replay_buffer_weight, [[problem.calc_S(g=elem.s0) for elem in alg.cascade_replay_buffer[i]] for i in range(len(alg.cascade_replay_buffer))]]
+            #                  , model_file)
+
+        # validation
+
+        # test summary
+        if n_iter % 100 == 0:
+            test = test_summary(alg=alg, problem=test_problem, q_net=readout, forbid_revisit=0)
+
+            test.run_test(problem=to_cuda(bg_hard), trial_num=1, batch_size=100, gnn_step=gnn_step,
+                          episode_len=episode_len, explore_prob=0.0, Temperature=1e-8)
+            epi_r0 = test.show_result()
+            best_hit0 = test.compare_opt(validation_problem0)
+
+            test.run_test(problem=to_cuda(bg_easy), trial_num=1, batch_size=100, gnn_step=gnn_step,
+                          episode_len=episode_len, explore_prob=0.0, Temperature=1e-8)
+            epi_r1 = test.show_result()
+            best_hit1 = test.compare_opt(validation_problem1)
+
+            test.run_test(problem=to_cuda(bg_subopt), trial_num=1, batch_size=100, gnn_step=gnn_step,
+                          episode_len=episode_len, explore_prob=0.0, Temperature=1e-8)
+            epi_r2 = test.show_result()
+            best_hit2 = test.compare_opt(validation_problem0)
 
         writer.add_scalar('Reward/Training Episode Reward', log.get_current('tot_return') / n_episode, n_iter)
         writer.add_scalar('Loss/Q-Loss', log.get_current('Q_error'), n_iter)
+        writer.add_scalar('Reward/Validation Episode Reward - hard', epi_r0, n_iter)
+        writer.add_scalar('Reward/Validation Episode Reward - easy', epi_r1, n_iter)
+        writer.add_scalar('Reward/Validation Episode Reward - subopt', epi_r2, n_iter)
+        writer.add_scalar('Reward/Validation Opt. hit percent - hard', best_hit0, n_iter)
+        writer.add_scalar('Reward/Validation Opt. hit percent - easy', best_hit1, n_iter)
+        writer.add_scalar('Reward/Validation Opt. hit percent - subopt', best_hit2, n_iter)
         writer.add_scalar('Time/Running Time per Epoch', T2 - T1, n_iter)
 
 if __name__ == '__main__':
+
     run_dqn(alg)
 
 # sample_buffer = alg[4]

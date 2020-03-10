@@ -2,6 +2,7 @@
 """
 import numpy as np
 import toy_models.ga_helpers.corr_score.c_score_func
+# from corr_score import c_score_func
 # from toy_models.ga_helpers.corr_score.c_score_func import *
 
 def compile_room_func(corr_matrix, type_count):

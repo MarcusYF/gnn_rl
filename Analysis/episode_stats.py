@@ -2,24 +2,27 @@ from DQN import DQN, to_cuda, EpisodeHistory
 from k_cut import *
 import matplotlib.pyplot as plt
 import numpy as np
-import time
-import pickle
+import os
 import torch
 from tqdm import tqdm
-from toy_models.Qiter import vis_g
+from toy_models.Qiter import vis_g, state2QtableKey, QtableKey2state
 from pandas import DataFrame
 import dgl
 
 
 class test_summary:
 
-    def __init__(self, alg, problem=None, q_net='mlp'):
+    def __init__(self, alg, problem=None, q_net='mlp', forbid_revisit=False):
         if isinstance(alg, DQN):
             self.alg = alg.model
         else:
             self.alg = alg
 
         self.problem = problem
+        if isinstance(problem.g, BatchedDGLGraph):
+            self.n = problem.g.ndata['label'].shape[0] // problem.g.batch_size
+        else:
+            self.n = problem.g.ndata['label'].shape[0]
         # if isinstance(problem, BatchedDGLGraph):
         #     self.problem = problem
         # elif isinstance(problem, list):
@@ -34,33 +37,111 @@ class test_summary:
         self.max_gain_ratio = []
         # self.action_indices = DataFrame(range(27))
         self.q_net = q_net
+        self.forbid_revisit = forbid_revisit
+
+        self.all_states = list(set([state2QtableKey(x) for x in list(itertools.permutations([0, 0, 0, 1, 1, 1, 2, 2, 2], 9))]))
 
     # need to adapt from Canonical_solvers.py
-    def cmpt_optimal(self):
-        return
+    def cmpt_optimal(self, graph, path=None):
+
+        self.problem.g = to_cuda(graph)
+        res = [self.problem.calc_S().item()]
+        pb = self.problem
+
+        S = []
+        for j in range(280):
+            pb.reset_label(QtableKey2state(self.all_states[j]))
+            S.append(pb.calc_S())
+
+        s1 = torch.tensor(S).argmin()
+        res.append(S[s1].item())
+
+        if path is not None:
+            path = os.path.abspath(os.path.join(os.getcwd())) + path
+            pb.reset_label(QtableKey2state(self.all_states[s1]))
+            vis_g(pb, name=path, topo='cut')
+        return QtableKey2state(self.all_states[s1]), res
 
     # need to adapt from Canonical_solvers.py
-    def test_greedy(self):
-        return
+    def test_greedy(self, graph, path=None):
+        self.problem.g = to_cuda(graph)
+        res = [self.problem.calc_S().item()]
+        pb = self.problem
+        if path is not None:
+            path = os.path.abspath(os.path.join(os.getcwd())) + path
+            vis_g(pb, name=path + str(0), topo='cut')
+        R = []
+        Reward = []
+        for j in range(100):
+            M = []
+            actions = pb.get_legal_actions()
+            for k in range(actions.shape[0]):
+                _, r = pb.step(actions[k], state=dc(pb.g))
+                M.append(r)
+            if max(M) <= 0:
+                break
+            if path is not None:
+                vis_g(pb, name=path + str(j+1), topo='cut')
+            posi = [x for x in M if x > 0]
+            nega = [x for x in M if x <= 0]
+            # print('posi reward ratio:', len(posi) / len(M))
+            # print('posi reward avg:', sum(posi) / len(posi))
+            # print('nega reward avg:', sum(nega) / len(nega))
+            max_idx = torch.tensor(M).argmax().item()
+            _, r = pb.step((actions[max_idx, 0].item(), actions[max_idx, 1].item()))
+            R.append((actions[max_idx, 0].item(), actions[max_idx, 1].item(), r.item()))
+            Reward.append(r.item())
+            res.append(res[-1] - r.item())
+        return QtableKey2state(state2QtableKey(pb.g.ndata['label'].argmax(dim=1).cpu().numpy())), R, res
+
+    def test_dqn(self, alg, g_i, t, path=None):
+
+        init_state = dc(self.episodes[g_i].init_state)
+        label_history = init_state.ndata['label'][self.episodes[g_i].label_perm]
+
+        self.problem.g = dc(init_state)
+        self.problem.reset_label(label=label_history[0].argmax(dim=1))
+        self.problem.calc_S()
+        if path is not None:
+            path = os.path.abspath(os.path.join(os.getcwd())) + path
+            vis_g(self.problem, name=path + str(0), topo='cut')
+
+        for i in range(t):
+            actions = self.problem.get_legal_actions(state=self.problem.g)
+            S_a_encoding, h1, h2, Q_sa = alg.forward(to_cuda(self.problem.g), actions.cuda(), gnn_step=3)
+            _, r = self.problem.step(state=self.problem.g, action=actions[torch.argmax(Q_sa)])
+
+            print(Q_sa.detach().cpu().numpy())
+            print('action index:', torch.argmax(Q_sa).detach().cpu().item())
+            print('action:', actions[torch.argmax(Q_sa)].detach().cpu().numpy())
+            print('reward:', r.item())
+            if path is not None:
+                vis_g(self.problem, name=path + str(i+1), topo='cut')
+
+    def compare_result(self):
+
+        for gi in range(self.batch_size):
+
+            print('Analyze', gi)
+            opt, rs = self.cmpt_optimal(self.episodes[gi].init_state)
+            grd, R, rs = self.test_greedy(self.episodes[gi].init_state)
+            self.test_dqn(self.alg, gi, 7)
 
     def run_test(self, problem=None, trial_num=1, batch_size=100, gnn_step=3, episode_len=50, explore_prob=0.1, Temperature=1.0):
-        self.num_actions = self.problem.N * (self.problem.N - self.problem.m) // 2
-
+        self.num_actions = self.problem.N * (self.problem.N - self.problem.m) // 2 + 1
+        self.trial_num = trial_num
+        self.batch_size = batch_size
         if problem is None:
-            self.batch_size = batch_size
             batch_size *= trial_num
-            self.trial_num = trial_num
             bg = self.problem.gen_batch_graph(batch_size=self.batch_size)
             self.bg = to_cuda(self.problem.gen_batch_graph(x=bg.ndata['x'].repeat(trial_num, 1), batch_size=batch_size))
             gl = dgl.unbatch(self.bg)
             test_problem = self.problem
         else:
-            # unit test
-            batch_size = 1
-            self.batch_size = batch_size
-            self.bg = dgl.batch([problem.g])
+            # for validation problem set
+            self.bg = problem
             gl = dgl.unbatch(self.bg)
-            self.problem = dc(problem)
+            self.problem.g = self.bg
             test_problem = self.problem
 
         self.action_mask = torch.tensor(range(0, self.num_actions * batch_size, self.num_actions)).cuda()
@@ -72,26 +153,36 @@ class test_summary:
         for i in tqdm(range(episode_len)):
             batch_legal_actions = test_problem.get_legal_actions(state=self.bg, action_type='swap').cuda()
 
+            # if self.forbid_revisit and i > 0:
+            #
+            #     previous_actions = torch.tensor([ep[k].action_seq[i-1][0] * (self.n ** 2) + ep[k].action_seq[i-1][1] for k in range(batch_size)])
+            #     bla = (self.n ** 2) * batch_legal_actions.view(batch_size, -1, 2)[:, :, 0] + batch_legal_actions.view(batch_size, -1, 2)[:, :, 1]
+            #     forbid_action_mask = (bla.t() == previous_actions.cuda())
+            #     batch_legal_actions = batch_legal_actions * (1 - forbid_action_mask.int()).t().flatten().unsqueeze(1)
+
+            forbid_action_mask = torch.zeros(batch_legal_actions.shape[0], 1).cuda()
+            if self.forbid_revisit:
+                for k in range(batch_size):
+                    cur_state = ep[k].enc_state_seq[-1]  # current state for the k-th episode
+                    forbid_states = set(ep[k].enc_state_seq[-1-self.forbid_revisit:-1])
+                    candicate_actions = batch_legal_actions[k*self.num_actions:(k+1)*self.num_actions,:]
+                    for j in range(self.num_actions):
+                        cur_state_l = QtableKey2state(cur_state)
+                        cur_state_l[candicate_actions[j][0]] ^= cur_state_l[candicate_actions[j][1]]
+                        cur_state_l[candicate_actions[j][1]] ^= cur_state_l[candicate_actions[j][0]]
+                        cur_state_l[candicate_actions[j][0]] ^= cur_state_l[candicate_actions[j][1]]
+                        if state2QtableKey(cur_state_l) in forbid_states:
+                            forbid_action_mask[j + k * self.num_actions] += 1
+
+            batch_legal_actions = batch_legal_actions * (1 - forbid_action_mask.int()).t().flatten().unsqueeze(1)
+
             if self.q_net == 'mlp':
                 S_a_encoding, h1, h2, Q_sa = self.alg.forward(self.bg, batch_legal_actions, gnn_step=gnn_step)
             else:
                 S_a_encoding, h1, h2, Q_sa = self.alg.forward_MHA(self.bg, batch_legal_actions, gnn_step=gnn_step)
-            # # epsilon greedy strategy
-            # if torch.rand(1) > explore_prob:
-            #     # action_idx1 = Q_sa.argmax()
-            #     weight = torch.softmax(softmax_constant * Q_sa.detach().cpu(), dim=0)
-            #     # print(max(weight))
-            #     action_idx = self.action_indices.sample(n=1, weights=weight).values[0][0]
-            #     # print('111', action_idx1)
-            #     # print('222', action_idx)
-            # else:
-            #     action_idx = torch.randint(high=legal_actions.shape[0], size=(1,)).squeeze()
 
-            # print(Q_sa.view(-1, self.num_actions).max(dim=1))
-            # best_actions = Q_sa.view(-1, self.num_actions).argmax(dim=1)
-            # print(Q_sa.view(-1, self.num_actions).max(dim=1).values)
             terminate_episode = (Q_sa.view(-1, self.num_actions).max(dim=1).values < 0.).nonzero().flatten().cpu().numpy()
-            # print(terminate_episode)
+
             for idx in terminate_episode:
                 if self.end_of_episode[idx] == episode_len - 1:
                     self.end_of_episode[idx] = i
@@ -105,17 +196,34 @@ class test_summary:
 
             actions = batch_legal_actions[chose_actions]
 
-            _, rewards = self.problem.step_batch(states=self.bg, action=actions)
+            _, rewards, sub_rewards = self.problem.step_batch(states=self.bg, action=actions, return_sub_reward=True)
 
             R = [reward.item() for reward in rewards]
 
-            # print(R[0])
-            # print(- torch.sum(F.softmax(Q_sa) * F.log_softmax(Q_sa)).cpu().item())
-            # print(torch.max(Q_sa).cpu().item(), torch.mean(Q_sa).cpu().item(), torch.min(Q_sa).cpu().item(), torch.std(Q_sa).cpu().item())
-            # print(torch.std(Q_sa))
-            [ep[k].write(action=actions[k, :], action_idx=best_actions[k] - self.action_mask[k], reward=R[k]) for k in range(batch_size)]
+            enc_states = [state2QtableKey(self.bg.ndata['label'][k * self.n: (k + 1) * self.n].argmax(dim=1).cpu().numpy()) for k in range(batch_size)]
+
+            [ep[k].write(action=actions[k, :], action_idx=best_actions[k] - self.action_mask[k], reward=R[k]
+                         , q_val=Q_sa.view(-1, self.num_actions)[k, :]
+                         , actions=batch_legal_actions.view(-1, self.num_actions, 2)[k, :, :]
+                         , state_enc=enc_states[k]
+                         , sub_reward=sub_rewards[:, k].cpu().numpy()) for k in range(batch_size)]
 
         self.episodes = ep
+
+    def compare_opt(self, validation_problem):
+
+        bingo = 0
+        for i in range(self.batch_size):
+            self.problem.g = self.episodes[i].init_state
+            end_perm = self.episodes[i].label_perm[self.end_of_episode[i]]
+            end_label = self.episodes[i].init_state.ndata['label'][end_perm]
+            dqn_result = state2QtableKey(end_label.argmax(dim=1).cpu().numpy())
+            opt_result = state2QtableKey(validation_problem[i][1])
+            grd_result = state2QtableKey(validation_problem[i][2])
+            if dqn_result == opt_result:
+                bingo += 1
+        print('Optimal solution hit percentage:', bingo)
+        return bingo
 
     def show_result(self):
         # print(self.end_of_episode)
@@ -136,11 +244,15 @@ class test_summary:
         episode_max_gain_ratios = []
         for i in select_indices:
             initial_S.append(self.S[i].item())
-            episode_gains.append(self.S[i].item() - sum(self.episodes[i].reward_seq))
+            episode_gains.append(self.S[i].item() - sum(self.episodes[i].reward_seq[:self.end_of_episode[i]]))
             episode_max_gains.append(self.S[i].item() - max(max(np.cumsum(self.episodes[i].reward_seq)), 0))
             episode_max_gain_steps.append(np.argmax(np.cumsum(self.episodes[i].reward_seq)) + 1)
             episode_gain_ratios.append(episode_gains[-1] / self.S[i].item())
             episode_max_gain_ratios.append(max(episode_max_gains[-1], 0) / self.S[i].item())
+
+            # if episode_max_gains[-1] < episode_gains[-1]:
+            #     print(i)
+            #     print(self.episodes[i].reward_seq)
         print('Avg value of initial S:', np.mean(self.S))
         print('Avg episode end value:', np.mean(episode_gains))
         print('Avg episode best value:', np.mean(episode_max_gains))
@@ -150,7 +262,7 @@ class test_summary:
         print('Avg percentage episode gain:', 1 - self.trial_num * sum(episode_gains) / sum(self.S).item())  #np.mean(episode_gain_ratios))
         print('Avg percentage max gain:', 1 - self.trial_num * sum(episode_max_gains) / sum(self.S).item())  #np.mean(episode_max_gain_ratios))
         print('Percentage of instances with positive gain:', len([x for x in episode_max_gains if x > 0]) / self.batch_size)
-
+        return np.mean(self.S) - np.mean(episode_gains)
 # if __name__ == '__main__':
 #
 #     folder = '/u/fy4bc/code/research/RL4CombOptm/Models/dqn_0114_base/'

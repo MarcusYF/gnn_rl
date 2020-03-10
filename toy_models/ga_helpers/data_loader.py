@@ -25,6 +25,7 @@ class ColocationConfig:
     total_room_count: int = 51
     total_type_count: int = 4
     selected_rooms: List[int] = dataclasses.field(default_factory=list)
+    manner: str = 'fix_type'
     room_count: int = 5
     type_count: int = 4
     population_count: int = 30
@@ -89,6 +90,10 @@ def load_config(config_file_path: str) -> ColocationConfig:
     config = ColocationConfig(**config)  # type: ignore
 
     return config
+
+
+def dump_matrix(matrix, path):
+    scipy.io.savemat(path, {'corr': matrix})
 
 
 def load_matrix(matrix_file: str):
