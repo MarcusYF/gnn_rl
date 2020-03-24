@@ -15,8 +15,11 @@ from toy_models.Qiter import vis_g, state2QtableKey, QtableKey2state
 
 def to_cuda(G_):
     G = dc(G_)
+    G.ndata['x'] = G.ndata['x'].cuda()
     G.ndata['label'] = G.ndata['label'].cuda()
+    # G.ndata['h'] = G.ndata['h'].cuda()
     G.edata['d'] = G.edata['d'].cuda()
+    G.edata['w'] = G.edata['w'].cuda()
     G.edata['e_type'] = G.edata['e_type'].cuda()
     return G
 
@@ -36,11 +39,14 @@ class EpisodeHistory:
         self.action_candidates = []
         self.enc_state_seq = []
         self.sub_reward_seq = []
+        # self.calib_reward_seq = []
         if self.action_type == 'swap':
             self.label_perm = torch.tensor(range(self.n)).unsqueeze(0)
             self.enc_state_seq.append(state2QtableKey(self.init_state.ndata['label'].argmax(dim=1).cpu().numpy()))
         if self.action_type == 'flip':
             self.label_perm = self.init_state.ndata['label'].nonzero()[:, 1].unsqueeze(0)
+        # self.visited_state = set([''.join([str(i.item()) for i in torch.tensor(range(self.n)).unsqueeze(0)[0]])])
+        # self.node_visit_cnt = [0] * self.n
         self.best_gain_sofar = 0
         self.current_gain = 0
         self.loop_start_position = 0
@@ -55,10 +61,22 @@ class EpisodeHistory:
             label[action[0]] = action[1]
         return label.unsqueeze(0)
 
+    # def check_loop(self, action):
+    #
+    #     new_label = self.perm_label(self.label_perm[-1, :], action)
+    #     new_label_str = ''.join([str(i.item()) for i in new_label[0]])
+    #     if new_label_str in self.visited_state:
+    #         return True
+    #     else:
+    #         return False
+
     def write(self, action, action_idx, reward, q_val=None, actions=None, state_enc=None, sub_reward=None, loop_start_position=None):
+
 
         new_label = self.perm_label(self.label_perm[-1, :], action)
 
+        # new_label_str = ''.join([str(i.item()) for i in new_label[0]])
+        # self.visited_state.add(new_label_str)
         self.action_seq.append(action)
 
         self.action_indices.append(action_idx)
@@ -74,14 +92,25 @@ class EpisodeHistory:
         self.sub_reward_seq.append(sub_reward)
 
         self.loop_start_position = loop_start_position
+        # self.current_gain += reward
+
+        # self.calib_reward_seq.append(max(self.best_gain_sofar, self.current_gain) - self.best_gain_sofar)
+
+        # print('best gain previous:', self.best_gain_sofar)
+        # print('current gain:', self.current_gain)
+        # self.best_gain_sofar = max(self.best_gain_sofar, self.current_gain)
+        # print('renewed best gain:', self.best_gain_sofar)
+        # print(reward, self.current_gain, self.best_gain_sofar)
 
         self.label_perm = torch.cat([self.label_perm, new_label], dim=0)
-
+        # self.node_visit_cnt[action[0]] += 1
+        # self.node_visit_cnt[action[1]] += 1
         self.episode_len += 1
 
     def wrap(self):
         self.reward_seq = torch.tensor(self.reward_seq)
         self.empl_reward_seq = torch.tensor(self.empl_reward_seq)
+        # self.calib_reward_seq = torch.tensor(self.calib_reward_seq)
         self.label_perm = self.label_perm.long()
 
 
@@ -90,7 +119,69 @@ class sars:
     s0: DGLGraph
     a: tuple
     r: float
+    sub_r: torch.tensor
     s1: DGLGraph
+    S: float
+    best_S: float
+    step: int
+    recent_states: list
+    forbid_actions: list
+
+
+def weight_monitor(model, model_target):
+    # gnn_0 = torch.mean(model.layers[0].apply_mod.l0.weight).item(), torch.std(model.layers[0].apply_mod.l0.weight).item()
+    # gnn_1 = torch.mean(model.layers[0].apply_mod.l1.weight).item(), torch.std(model.layers[0].apply_mod.l1.weight).item()
+    # gnn_2 = torch.mean(model.layers[0].apply_mod.l2.weight).item(), torch.std(model.layers[0].apply_mod.l2.weight).item()
+    # gnn_3 = torch.mean(model.layers[0].apply_mod.l3.weight).item(), torch.std(model.layers[0].apply_mod.l3.weight).item()
+    # gnn_4 = torch.mean(model.layers[0].apply_mod.l4.weight).item(), torch.std(model.layers[0].apply_mod.l4.weight).item()
+    # gnn_5 = torch.mean(model.layers[0].apply_mod.l5.weight).item(), torch.std(model.layers[0].apply_mod.l5.weight).item()
+    # attn = [(torch.mean(model.MHA.linears[i].weight).item(), torch.std(model.MHA.linears[i].weight).item()) for i in range(4)]
+    # q_net_1 = torch.mean(model.value1.weight).item(), torch.std(model.value1.weight).item()
+    # q_net_2 = torch.mean(model.value2.weight).item(), torch.std(model.value2.weight).item()
+    # gnn_diff0 = torch.norm(model.layers[0].apply_mod.l0.weight - model_target.layers[0].apply_mod.l0.weight).item()
+    # gnn_diff1 = torch.norm(model.layers[0].apply_mod.l1.weight - model_target.layers[0].apply_mod.l1.weight).item()
+    # gnn_diff2 = torch.norm(model.layers[0].apply_mod.l2.weight - model_target.layers[0].apply_mod.l2.weight).item()
+    # gnn_diff3 = torch.norm(model.layers[0].apply_mod.l3.weight - model_target.layers[0].apply_mod.l3.weight).item()
+    # gnn_diff4 = torch.norm(model.layers[0].apply_mod.l4.weight - model_target.layers[0].apply_mod.l4.weight).item()
+    # gnn_diff5 = torch.norm(model.layers[0].apply_mod.l5.weight - model_target.layers[0].apply_mod.l5.weight).item()
+    # attn_diff0 = torch.norm(model.MHA.linears[0].weight - model_target.MHA.linears[0].weight).item()
+    # attn_diff1 = torch.norm(model.MHA.linears[1].weight - model_target.MHA.linears[1].weight).item()
+    # attn_diff2 = torch.norm(model.MHA.linears[2].weight - model_target.MHA.linears[2].weight).item()
+    # attn_diff3 = torch.norm(model.MHA.linears[3].weight - model_target.MHA.linears[3].weight).item()
+    # q_net_diff1 = torch.norm(model.value1.weight - model_target.value1.weight).item()
+    # q_net_diff2 = torch.norm(model.value2.weight - model_target.value2.weight).item()
+    # return {'gnn0':gnn_0, 'gnn1':gnn_1, 'gnn2':gnn_2, 'gnn3':gnn_3, 'gnn4':gnn_4, 'gnn5':gnn_5,
+    #         'attn':attn, 'q_net1':q_net_1, 'q_net2':q_net_2, 'gnn_diff0':gnn_diff0,
+    #         'gnn_diff1':gnn_diff1, 'gnn_diff2':gnn_diff2, 'gnn_diff3':gnn_diff3, 'gnn_diff4':gnn_diff4, 'gnn_diff5':gnn_diff5,
+    #         'attn_diff0':attn_diff0, 'attn_diff1':attn_diff1, 'attn_diff2':attn_diff2, 'attn_diff3':attn_diff3,
+    #         'q_net_diff1':q_net_diff1, 'q_net_diff2':q_net_diff2}
+
+    gnn_0 = torch.mean(model.layers[0].apply_mod.l0.weight).item(), torch.std(model.layers[0].apply_mod.l0.weight).item()
+    gnn_1 = torch.mean(model.layers[0].apply_mod.l1.weight).item(), torch.std(model.layers[0].apply_mod.l1.weight).item()
+    gnn_2 = torch.mean(model.layers[0].apply_mod.l2.weight).item(), torch.std(model.layers[0].apply_mod.l2.weight).item()
+    gnn_3 = torch.mean(model.layers[0].apply_mod.t3.weight).item(), torch.std(model.layers[0].apply_mod.l3.weight).item()
+    gnn_4 = torch.mean(model.layers[0].apply_mod.t4.weight).item(), torch.std(model.layers[0].apply_mod.l4.weight).item()
+
+
+    gnn_diff0 = torch.norm(model.layers[0].apply_mod.l0.weight - model_target.layers[0].apply_mod.l0.weight).item()
+    gnn_diff1 = torch.norm(model.layers[0].apply_mod.l1.weight - model_target.layers[0].apply_mod.l1.weight).item()
+    gnn_diff2 = torch.norm(model.layers[0].apply_mod.l2.weight - model_target.layers[0].apply_mod.l2.weight).item()
+    gnn_diff3 = torch.norm(model.layers[0].apply_mod.t3.weight - model_target.layers[0].apply_mod.t3.weight).item()
+    gnn_diff4 = torch.norm(model.layers[0].apply_mod.t4.weight - model_target.layers[0].apply_mod.t4.weight).item()
+
+    q_net_1 = torch.mean(model.t5.weight).item(), torch.std(model.t5.weight).item()
+    q_net_2 = torch.mean(model.t6.weight).item(), torch.std(model.t6.weight).item()
+    q_net_3 = torch.mean(model.t7.weight).item(), torch.std(model.t7.weight).item()
+
+    q_net_diff1 = torch.norm(model.t5.weight - model_target.t5.weight).item()
+    q_net_diff2 = torch.norm(model.t6.weight - model_target.t6.weight).item()
+    q_net_diff3 = torch.norm(model.t7.weight - model_target.t7.weight).item()
+
+
+    return {'gnn0':gnn_0, 'gnn1':gnn_1, 'gnn2':gnn_2, 'gnn3':gnn_3, 'gnn4':gnn_4,
+            'q_net1':q_net_1, 'q_net2':q_net_2, 'q_net3':q_net_3,
+            'gnn_diff0':gnn_diff0, 'gnn_diff1':gnn_diff1, 'gnn_diff2':gnn_diff2, 'gnn_diff3':gnn_diff3, 'gnn_diff4':gnn_diff4,
+            'q_net_diff1':q_net_diff1, 'q_net_diff2':q_net_diff2, 'q_net_diff3':q_net_diff3}
 
 
 class DQN:
@@ -169,6 +260,8 @@ class DQN:
             # TODO: multi - gpu parallelization
             _, _, _, Q_sa = self.model(dc(bg), batch_legal_actions, action_type=action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-t-1)
 
+            # _, _, _, S_eval = self.model.forward_state_eval(dc(bg))
+            # print(S_eval)
             best_actions = Q_sa.view(-1, num_actions).argmax(dim=1)
 
             explore_episode_indices = explore_replace_mask[explore_step_offset[t]: explore_step_offset[t + 1]][:, 1]
@@ -180,14 +273,22 @@ class DQN:
 
             # update bg inplace and calculate batch rewards
             g0 = [g for g in dgl.unbatch(dc(bg))]  # current_state
-            _, rewards = self.problem.step_batch(states=bg, action=actions)
+            kcut_valueS = self.problem.calc_batchS(bg=bg)
+            _, rewards, sub_rewards = self.problem.step_batch(states=bg, action=actions, return_sub_reward=True)
             g1 = [g for g in dgl.unbatch(dc(bg))]  # after_state
 
-            if self.sample_batch_episode:
-                self.experience_replay_buffer.extend([sars(g0[i], actions[i], rewards[i], g1[i]) for i in range(batch_size)])
-            else:  # using cascade buffer
+            # print('assert=0:', kcut_valueS_ - kcut_valueS + rewards)
 
-                self.cascade_replay_buffer[t].extend([sars(g0[i], actions[i], rewards[i], g1[i]) for i in range(batch_size)])
+            if self.sample_batch_episode:
+                self.experience_replay_buffer.extend([sars(g0[i], actions[i], rewards[i], g1[i], kcut_valueS[i], t) for i in range(batch_size)])
+            else:  # using cascade buffer
+                # update episode best S
+                if t > 0:
+                    best_S = [np.min([kcut_valueS[i], self.cascade_replay_buffer[t-1][i].best_S]) for i in range(batch_size)]
+                else:
+                    best_S = [kcut_valueS[i] for i in range(batch_size)]
+                self.cascade_replay_buffer[t].extend([sars(g0[i], actions[i], rewards[i], sub_rewards[:, i], g1[i], kcut_valueS[i], best_S[i], t, recent_states=[], forbid_actions=[]) for i in range(batch_size)])
+                self.cascade_buffer_kcut_value[t, :batch_size] = kcut_valueS
 
                 if self.priority_sampling:
                     # compute prioritized weights
@@ -271,22 +372,64 @@ class DQN:
         _, _, _, Q_sa = self.model(dc(bg), batch_legal_actions, action_type=action_type, gnn_step=gnn_step)
 
         # TODO: can alter explore strength according to kcut_valueS
+        kcut_valueS = self.problem.calc_batchS(bg=bg)
         chosen_actions = self.sample_actions_from_q(Q_sa, num_actions, batch_size, Temperature=self.eps)
         actions = batch_legal_actions[chosen_actions]
 
         # update bg inplace and calculate batch rewards
         g0 = [g for g in dgl.unbatch(dc(bg))]  # current_state
-        _, rewards = self.problem.step_batch(states=bg, action=actions)
-        g1 = [g for g in dgl.unbatch(dc(bg))]  # after_state
 
+        _, rewards, sub_rewards = self.problem.step_batch(states=bg, action=actions, return_sub_reward=True)
+        g1 = [g for g in dgl.unbatch(dc(bg))]  # after_state
+        # kcut_valueS_ = self.problem.calc_batchS(bg=bg)
+        # print('assert=0:', kcut_valueS_ - kcut_valueS + rewards)
+        # rewards_ = rewards.reshape(self.buf_epi_len, -1)
+        # posi_r = rewards_ >= 0
+        # nege_r = rewards_ < 0
+        # scaled_rewards = (rewards_-torch.mean(rewards_, dim=1).t().unsqueeze(1)) / torch.std(rewards_, dim=1).t().unsqueeze(1)
+        # scaled_rewards = scaled_rewards * posi_r + rewards_ * nege_r
+        #
+        # scaled_rewards = scaled_rewards.view(-1)
+
+        # update episode best S
+
+        best_S = torch.cat([kcut_valueS[:self.new_epi_batch_size].cpu() \
+                    , torch.tensor([[np.min([kcut_valueS[j+t*self.new_epi_batch_size], self.cascade_replay_buffer[t - 1][j-self.new_epi_batch_size].best_S]) for j in range(self.new_epi_batch_size)] for t in range(1, self.buf_epi_len)]).flatten()])
+
+        # update recent states
+        recent_states = [[state2QtableKey(g.ndata['label'].argmax(dim=1).cpu().numpy())] for g in g0[:self.new_epi_batch_size]]
+        recent_states.extend(
+            list(itertools.chain(
+            *[
+                [
+                    self.cascade_replay_buffer[t - 1][j - self.new_epi_batch_size].recent_states
+                    + [
+                        state2QtableKey(g0[j+t*self.new_epi_batch_size].ndata['label'].argmax(dim=1).cpu().numpy())
+                       ]
+                 for j in range(self.new_epi_batch_size)
+                 ] for t in range(1, self.buf_epi_len)
+            ]))
+        )
+
+        memory_len = 10
+        recent_states = [state[-memory_len:] for state in recent_states]
+        forbid_actions = []
 
         [self.cascade_replay_buffer[t].extend(
             [sars(g0[j+t*self.new_epi_batch_size]
             , actions[j+t*self.new_epi_batch_size]
             , rewards[j+t*self.new_epi_batch_size]
-            , g1[j+t*self.new_epi_batch_size])
+            , sub_rewards[:, j + t * self.new_epi_batch_size]
+            , g1[j+t*self.new_epi_batch_size]
+            , kcut_valueS[j+t*self.new_epi_batch_size]
+            , best_S[j+t*self.new_epi_batch_size]
+            , t
+            , recent_states[j+t*self.new_epi_batch_size]
+            , forbid_actions)
             for j in range(self.new_epi_batch_size)])
          for t in range(self.buf_epi_len)]
+
+        self.cascade_buffer_kcut_value = torch.cat([self.cascade_buffer_kcut_value, torch.abs(kcut_valueS.detach().cpu().view(self.buf_epi_len, self.new_epi_batch_size))], dim=1).detach()
 
         if self.priority_sampling:
             # compute prioritized weights
@@ -321,12 +464,15 @@ class DQN:
         # TODO: multi-gpu parallelization
         _, _, _, Q_s1a_ = self.model(batch_begin_state, batch_begin_action, action_type=self.action_type, gnn_step=gnn_step)
         _, _, _, Q_s2a = self.model_target(batch_end_state, batch_end_action, action_type=self.action_type, gnn_step=gnn_step)
+        # Q_s2a = Q_s2a.detach()
+        if self.clip_target:
+            Q_s2a = F.relu(Q_s2a)
+        else:
+            q = self.gamma ** q_step * Q_s2a.view(-1, action_num).max(dim=1).values - Q_s1a_
 
-
-        q = self.gamma ** q_step * Q_s2a.view(-1, action_num).max(dim=1).values - Q_s1a_
         Q = q.unsqueeze(0)
 
-        return torch.cat(R), Q
+        return torch.cat(R), Q, sample_buffer
 
     def sample_from_cascade_buffer(self, batch_size, q_step, gnn_step):
 
@@ -359,6 +505,9 @@ class DQN:
         batch_begin_state = dgl.batch([tpl.s0 for tpl in sample_buffer])
         batch_end_state = dgl.batch([tpl.s1 for tpl in sample_buffer])
         R = [tpl.r.unsqueeze(0) for tpl in sample_buffer]
+        sub_R = torch.cat([tpl.sub_r.unsqueeze(0) for tpl in sample_buffer])  # (b, k)
+        S = torch.cat([tpl.S.unsqueeze(0) for tpl in sample_buffer])
+        best_S = torch.cat([tpl.best_S.unsqueeze(0).cuda() for tpl in sample_buffer])
 
         batch_begin_action = torch.cat([tpl.a.unsqueeze(0) for tpl in sample_buffer], axis=0)
 
@@ -370,9 +519,28 @@ class DQN:
         _, _, _, Q_s1a_ = self.model(batch_begin_state, batch_begin_action, action_type=self.action_type, gnn_step=gnn_step)
         _, _, _, Q_s2a = self.model_target(batch_end_state, batch_end_action, action_type=self.action_type, gnn_step=gnn_step)
 
+        # reward shaping
+        V_s = Q_s2a.view(-1, action_num).sum(dim=1) / action_num
+        beta = 0.1 / (torch.abs(V_s) + 0.1)
+        #  when close to opt, reward negative sub_reward
+        #1 internal_R = beta * F.relu(-sub_R).sum(dim=1)
+        #2 internal_R = beta * torch.abs(sub_R).sum(dim=1)
+        #3 internal_R = (V_s < 0) * torch.abs(sub_R).sum(dim=1)
+        #4 internal_R = (V_s < 0) * sub_R.max(dim=1).values
+        # internal_R = (V_s < 0) * (F.relu(-torch.cat(R)) + 10*F.relu(torch.cat(R)) + sub_R.max(dim=1).values)
+
+        internal_R = F.relu(best_S.cuda() - S + torch.cat(R))
+        if self.clip_target:
+            Q_s2a = F.relu(Q_s2a)
+
+        # if self.explore_method == 'soft_dqn':
+        #     sample_prob = F.softmax(Q_s2a.view(-1, action_num) / self.eps)
+        #     q = self.gamma ** q_step * torch.sum(sample_prob * Q_s2a.view(-1, action_num), dim=1) - Q_s1a_
+        # else:
         chosen_actions = self.sample_actions_from_q(Q_s2a, action_num, batch_size, Temperature=self.eps)
         q = self.gamma ** q_step * Q_s2a[chosen_actions] - Q_s1a_
 
+        # q = self.gamma ** q_step * Q_s2a.view(-1, action_num).max(dim=1).values - Q_s1a_
         if self.priority_sampling:
             # print(self.cascade_replay_buffer_weight.view(-1)[selected_indices])
             self.cascade_replay_buffer_weight.flatten()[selected_indices] = torch.abs(q).cpu()
@@ -381,12 +549,14 @@ class DQN:
 
         Q = q.unsqueeze(0)
 
-        return torch.cat(R), Q
+        return torch.cat(R), internal_R, Q, sample_buffer
 
     def back_loss(self, R, Q, update_model=True):
 
-
-        L = torch.pow(R.cuda() + Q, 2).sum()
+        if self.clip_target:
+            L = torch.pow(F.relu(R.cuda()) + Q, 2).sum()
+        else:
+            L = torch.pow(R.cuda() + Q, 2).sum()
         L.backward(retain_graph=True)
 
         self.Q_err += L.item()
@@ -418,7 +588,7 @@ class DQN:
             # trim experience replay buffer
             self.trim_replay_buffer(epoch)
 
-            R, Q = self.sample_from_buffer(batch_size=batch_size, q_step=q_step, gnn_step=gnn_step)
+            R, Q, sample_buffer = self.sample_from_buffer(batch_size=batch_size, q_step=q_step, gnn_step=gnn_step)
 
             T6 = time.time()
         else:
@@ -435,8 +605,9 @@ class DQN:
             # trim experience replay buffer
             self.trim_replay_buffer(epoch)
 
-            R, Q = self.sample_from_cascade_buffer(batch_size=batch_size, q_step=q_step, gnn_step=gnn_step)
-
+            R, internal_R, Q, sample_buffer = self.sample_from_cascade_buffer(batch_size=batch_size, q_step=q_step, gnn_step=gnn_step)
+            # print('external R:', R)
+            # print('internal_R:', internal_R)
             T6 = time.time()
         # 0.5s
         self.back_loss(R, Q, update_model=True)
@@ -446,7 +617,7 @@ class DQN:
 
         print(T4-T3, T6-T4, T7-T6)
 
-        return self.log
+        return self.log, sample_buffer
 
     def trim_replay_buffer(self, epoch):
         if len(self.experience_replay_buffer) > self.replay_buffer_max_size:
@@ -455,8 +626,8 @@ class DQN:
         if epoch * self.buf_epi_len * self.new_epi_batch_size > self.replay_buffer_max_size:
             for i in range(self.buf_epi_len):
                 self.cascade_replay_buffer[i] = self.cascade_replay_buffer[i][-self.stage_max_sizes[i]:]
-        # self.cascade_replay_buffer_weight = self.cascade_replay_buffer_weight[:, -self.stage_max_sizes[0]:]
-        # self.cascade_buffer_kcut_value = self.cascade_buffer_kcut_value[:, -self.stage_max_sizes[0]:]
+        self.cascade_replay_buffer_weight = self.cascade_replay_buffer_weight[:, -self.stage_max_sizes[0]:]
+        self.cascade_buffer_kcut_value = self.cascade_buffer_kcut_value[:, -self.stage_max_sizes[0]:]
 
 
     def update_target_net(self):

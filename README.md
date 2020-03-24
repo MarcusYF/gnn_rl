@@ -17,10 +17,10 @@ State-action encoding.
 
 10 by 10 
 --complete
-Avg value of initial S: 234.7038572692871
-Avg episode best value: 77.02441688537597
+Avg value of initial S: 234.7038572692871/233.924688/235.765625
+Avg episode best value: 77.02441688537597/82.699629/82.030137
 Avg step cost: 56.38
-Avg percentage max gain: 0.6718229611497091
+Avg percentage max gain: 0.6718229611497091/0.6464/0.6521
 --incomplete
 Avg value of initial S: 17.95418667793274
 Avg episode best value: 2.1257452952861784
@@ -29,10 +29,10 @@ Avg percentage max gain: 0.8816016936094965
 
 5 by 6 
 --complete
-Avg value of initial S: 39.173927841186526
-Avg episode best value: 18.204591732025147
+Avg value of initial S: 39.173927841186526/38.844648/39.56/39.024864
+Avg episode best value: 18.204591732025147/19.607192/19.37/18.484279
 Avg step cost: 11.88
-Avg percentage max gain: 0.5352880669554592
+Avg percentage max gain: 0.5352880669554592/0.4952/0.5102/0.5263
 --incomplete
 Avg value of initial S: 6.979210567474365
 Avg episode best value: 1.8567707288265227
@@ -41,8 +41,8 @@ Avg percentage max gain: 0.7339569123362257
 
 3by3
 --complete
-Avg value of initial S: 4.7138877820968625
-Avg episode best value: 2.8001146948337556
+Avg value of initial S: 4.7138877820968625/4.72
+Avg episode best value: 2.8001146948337556/2.90
 Avg step cost: 2.11                                                                                                                                                          
 Avg percentage max gain: 0.40598613622741136     
 --incomplete

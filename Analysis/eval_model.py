@@ -10,6 +10,7 @@ from Analysis.episode_stats import test_summary
 from toy_models.ga_helpers.data_loader import dump_matrix
 from toy_models.Qiter import vis_g
 from DQN import to_cuda
+from toy_models.Qiter import vis_g, state2QtableKey, QtableKey2state
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
@@ -20,15 +21,16 @@ model_name = 'dqn_3by3_0223_pauseA_w'
 model_name = 'dqn_3by3_0223_pauseA_clipQ'
 model_name = 'dqn_3by3_0223_base_in'
 model_name = 'dqn_3by3_0229_base1'
-# model_name = 'dqn_3by3_0225_h32'
-model_version = str(30000)
-k = 3
-m = 3
-ajr = 8
+# model_name = 'dqn_3by3_0310_base2'
+model_name = 'dqn_5by6_0315_mha'
+model_version = str(50000)
+k = 5
+m = 6
+ajr = 29
 h = 32
 mode = 'complete'
 q_net = 'mlp'
-batch_size = 100
+batch_size = 70
 trial_num = 1
 sample_episode = batch_size * trial_num
 gnn_step = 3
@@ -39,46 +41,110 @@ Temperature = 0.0000005
 folder = '/p/reinforcement/data/gnn_rl/model/dqn/' + model_name + '/'
 with open(folder + 'dqn_' + model_version, 'rb') as model_file:
     alg = pickle.load(model_file)
+# with open('/u/fy4bc/code/research/RL4CombOptm/gnn_rl/Models/test/aux_test16_2000', 'rb') as model_file:
+#     aux = pickle.load(model_file)
 
 # test summary
 problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h, mode=mode, sample_episode=sample_episode)
 test = test_summary(alg=alg, problem=problem, q_net=q_net, forbid_revisit=0)
 
-with open('/p/reinforcement/data/gnn_rl/model/test_data/3by3/0', 'rb') as valid_file:
-    validation_problem0 = pickle.load(valid_file)
-with open('/p/reinforcement/data/gnn_rl/model/test_data/3by3/1', 'rb') as valid_file:
-    validation_problem1 = pickle.load(valid_file)
-bg_hard = to_cuda(dgl.batch([p[0].g for p in validation_problem0[:batch_size]]))
-bg_easy = to_cuda(dgl.batch([p[0].g for p in validation_problem1[:batch_size]]))
-bg_subopt = []
-bg_opt = []
-for i in range(batch_size):
-    gi = to_cuda(validation_problem0[:batch_size][i][0].g)
-    problem.reset_label(g=gi, label=validation_problem0[:batch_size][i][2])
-    bg_subopt.append(gi)
-    gj = to_cuda(validation_problem0[:batch_size][i][0].g)
-    problem.reset_label(g=gj, label=validation_problem0[:batch_size][i][1])
-    bg_opt.append(gj)
-bg_subopt = dgl.batch(bg_subopt)
-bg_opt = dgl.batch(bg_opt)
-
-if ajr == 8:
-    bg_hard.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_hard.batch_size)
-    bg_easy.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_easy.batch_size)
-    bg_subopt.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_subopt.batch_size)
-    bg_opt.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_opt.batch_size)
+# with open('/p/reinforcement/data/gnn_rl/model/test_data/3by3/0', 'rb') as valid_file:
+#     validation_problem0 = pickle.load(valid_file)
+# with open('/p/reinforcement/data/gnn_rl/model/test_data/3by3/1', 'rb') as valid_file:
+#     validation_problem1 = pickle.load(valid_file)
+# bg_hard = to_cuda(dgl.batch([p[0].g for p in validation_problem0[:batch_size]]))
+# bg_easy = to_cuda(dgl.batch([p[0].g for p in validation_problem1[:batch_size]]))
+# bg_subopt = []
+# bg_opt = []
+# for i in range(batch_size):
+#     gi = to_cuda(validation_problem0[:batch_size][i][0].g)
+#     problem.reset_label(g=gi, label=validation_problem0[:batch_size][i][2])
+#     bg_subopt.append(gi)
+#     gj = to_cuda(validation_problem0[:batch_size][i][0].g)
+#     problem.reset_label(g=gj, label=validation_problem0[:batch_size][i][1])
+#     bg_opt.append(gj)
+# bg_subopt = dgl.batch(bg_subopt)
+# bg_opt = dgl.batch(bg_opt)
+#
+# if ajr == 8:
+#     bg_hard.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_hard.batch_size)
+#     bg_easy.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_easy.batch_size)
+#     bg_subopt.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_subopt.batch_size)
+#     bg_opt.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_opt.batch_size)
 
 
 # random validation set
-bg = to_cuda(problem.gen_batch_graph(batch_size=batch_size))
+bg = to_cuda(problem.gen_batch_graph(batch_size=batch_size, style='cluster'))
 test.run_test(problem=bg, trial_num=trial_num, batch_size=batch_size, gnn_step=gnn_step, episode_len=episode_len, explore_prob=explore_prob, Temperature=Temperature)
 test.show_result()
 
 # easy validation set
-test.run_test(problem=to_cuda(bg_easy), trial_num=1, batch_size=100, gnn_step=gnn_step,
-              episode_len=episode_len, explore_prob=0.0, Temperature=1e-8)
-epi_r1 = test.show_result()
-best_hit1 = test.compare_opt(validation_problem1)
+for beta in [0.1]:
+    print('beta', beta)
+    test.run_test(problem=to_cuda(bg_easy), init_trial=1, trial_num=1, batch_size=100, gnn_step=gnn_step,
+                  episode_len=episode_len, explore_prob=0.0, Temperature=1e-8
+                  , aux_model=None
+                  , beta=0)
+    epi_r1 = test.show_result()
+    best_hit1 = test.compare_opt(validation_problem1)
+
+j = 0
+for i in range(100):
+    if validation_problem0[0][2] == validation_problem0[0][1]:
+        j+=1
+# Avg value of initial S: 3.9125652
+# Avg episode end value: 2.799141228199005
+# Avg episode best value: 2.7874232637882232
+# Avg episode step budget(Avg/Max/Min): 1.8 5 1
+# Avg percentage episode gain: 0.2845764283910004
+# Avg percentage max gain: 0.2875713855108105
+bg = dgl.batch([problem.g, problem.g])
+batch_legal_actions = problem.get_legal_actions(state=bg).cuda()
+S_a_encoding, h1, h2, Q_sa = alg.forward(to_cuda(bg), batch_legal_actions)
+
+test.test_init_state(alg=alg, aux=aux, g_i=6, t=10, trial_num=10)
+
+
+g_i = 1
+[0,0,1,0,1,2,1,2,2]
+test.test_dqn(alg, g_i=g_i, t=5, init_label=[0, 1, 0, 1, 2, 0, 2, 1, 2], path=None)
+
+init_state = dc(test.episodes[g_i].init_state)
+problem.g = dc(init_state)
+problem.reset_label(label=[0,0,1,0,1,2,1,2,2])
+bg = dgl.batch([problem.g])
+S_enc, _, _, q = alg.forward(bg, torch.zeros(bg.batch_size, 2).int().cuda(), gnn_step=3)
+_, _, _, state_eval = aux.forward_state_eval(bg, S_enc, gnn_step=3)
+state_eval
+
+label_history = init_state.ndata['label'][test.episodes[g_i].label_perm]
+label_history[0].argmax(dim=1)
+
+a=[test.episodes[i].loop_start_position for  i in range(100)]
+b=[len(test.valid_states[i]) for  i in range(100)]
+sum(a)
+sum(b)
+test.state_eval[3][1,:]
+self=test
+bingo = []
+sway2 = []
+zero = []
+for i in range(100):
+    self.problem.g = self.episodes[i].init_state
+    end_perm = self.episodes[i].label_perm[self.end_of_episode[i]]
+    end_label = self.episodes[i].init_state.ndata['label'][end_perm]
+    dqn_result = state2QtableKey(end_label.argmax(dim=1).cpu().numpy())
+    opt_result = state2QtableKey(validation_problem1[i][1])
+    grd_result = state2QtableKey(validation_problem1[i][2])
+    if opt_result==dqn_result:
+        bingo.append(i)
+
+    a1 = self.episodes[i].action_seq[-1][0] * 10000 + self.episodes[i].action_seq[-1][1]
+    a2 = self.episodes[i].action_seq[-2][0] * 10000 + self.episodes[i].action_seq[-2][1]
+    if a1==a2 and a1 > 0:
+        sway2.append(i)
+    elif a1==0 and a2==0:
+        zero.append(i)
 
 # hard validation set
 test.run_test(problem=to_cuda(bg_hard), trial_num=1, batch_size=100, gnn_step=gnn_step,
@@ -174,8 +240,15 @@ vis_g(problem, name=path, topo='cut')
 
 
 g_i = 1
+test.episodes[g_i].reward_seq[:10]
+test.episodes[g_i].
+validation_problem1[g_i][1]
+
+
+
 init_state = dc(test.episodes[g_i].init_state)
 label_history = init_state.ndata['label'][test.episodes[g_i].label_perm]
+label_history[0].argmax(dim=1)
 
 problem.g = dc(init_state)
 problem.reset_label(label=label_history[0].argmax(dim=1))

@@ -41,15 +41,16 @@ def latestModelVersion(file):
 # python run.py --gpu=1 --save_folder=dqn_0124_test_fix_target_0
 # args
 parser = argparse.ArgumentParser(description="GNN with RL")
-parser.add_argument('--save_folder', default='dqn_3by3_0310_test')
+parser.add_argument('--save_folder', default='dqn_5by6_0323_plain')
 parser.add_argument('--gpu', default='0', help="")
 parser.add_argument('--resume', default=False)
 parser.add_argument('--problem_mode', default='complete', help="")
 parser.add_argument('--readout', default='mlp', help="")
 parser.add_argument('--action_type', default='swap', help="")
-parser.add_argument('--k', default=3, help="size of K-cut")
-parser.add_argument('--m', default=3, help="cluster size")
-parser.add_argument('--ajr', default=8, help="")
+parser.add_argument('--k', default=5, help="size of K-cut")
+parser.add_argument('--m', default=6, help="cluster size")
+parser.add_argument('--ajr', default=29, help="")
+parser.add_argument('--style', default='plain', help="")
 parser.add_argument('--h', default=32, help="hidden dimension")
 parser.add_argument('--extend_h', default=True)
 parser.add_argument('--use_x', default=0)
@@ -66,7 +67,7 @@ parser.add_argument('--explore_end_at', type=float, default=0.2, help="")
 parser.add_argument('--lr', type=float, default=0.001, help="learning rate")
 parser.add_argument('--action_dropout', type=float, default=1.0)
 parser.add_argument('--n_epoch', default=50000)
-parser.add_argument('--save_ckpt_step', default=20000)
+parser.add_argument('--save_ckpt_step', default=10000)
 parser.add_argument('--target_update_step', default=5)
 parser.add_argument('--replay_buffer_size', default=5000, help="")
 parser.add_argument('--batch_size', default=500, help='')
@@ -88,6 +89,7 @@ action_type = args['action_type']
 k = int(args['k'])
 m = int(args['m'])
 ajr = int(args['ajr'])
+graph_style = args['style']
 h = int(args['h'])
 extend_h = bool(args['extend_h'])
 use_x = bool(int(args['use_x']))
@@ -117,6 +119,7 @@ save_ckpt_step = int(args['save_ckpt_step'])
 ddqn = bool(args['ddqn'])
 
 os.environ['CUDA_VISIBLE_DEVICES'] = gpu
+run_validation = False
 
 # current working path
 # absroot = os.path.dirname(os.getcwd())
@@ -126,13 +129,11 @@ if not os.path.exists(path):
     os.makedirs(path)
 
 
-problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h, mode=problem_mode, sample_episode=n_episode)
+problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h, mode=problem_mode, sample_episode=n_episode, graph_style=graph_style)
 test_problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h, mode=problem_mode, sample_episode=test_episode)
 
 # model to be trained
-if not resume:
-    model_version = 0
-    alg = DQN(problem, action_type=action_type
+alg = DQN(problem, action_type=action_type
               , gamma=gamma, eps=.1, lr=lr, action_dropout=action_dropout
               , sample_batch_episode=sample_batch_episode
               , replay_buffer_max_size=replay_buffer_size
@@ -146,13 +147,18 @@ if not resume:
               , explore_method=explore_method
               , priority_sampling=priority_sampling
               , clip_target=clip_target)
+if not resume:
+    model_version = 0
     with open(path + 'dqn_0', 'wb') as model_file:
         pickle.dump(alg, model_file)
 else:
     model_version = latestModelVersion(path)
     with open(path + 'dqn_' + str(model_version), 'rb') as model_file:
         # might throw EOF error
-        alg = pickle.load(model_file)
+        model = pickle.load(model_file)
+    alg.model = model
+    alg.model_target = model
+
 
 # record current training settings
 if resume:
@@ -167,24 +173,25 @@ with open(path + 'params', mode) as params_file:
 
 
 # load validation set
-with open('/p/reinforcement/data/gnn_rl/model/test_data/3by3/0', 'rb') as valid_file:
-    validation_problem0 = pickle.load(valid_file)
-with open('/p/reinforcement/data/gnn_rl/model/test_data/3by3/1', 'rb') as valid_file:
-    validation_problem1 = pickle.load(valid_file)
-bg_hard = to_cuda(dgl.batch([p[0].g for p in validation_problem0[:test_episode]]))
-bg_easy = to_cuda(dgl.batch([p[0].g for p in validation_problem1[:test_episode]]))
+if run_validation:
+    with open('/p/reinforcement/data/gnn_rl/model/test_data/3by3/0', 'rb') as valid_file:
+        validation_problem0 = pickle.load(valid_file)
+    with open('/p/reinforcement/data/gnn_rl/model/test_data/3by3/1', 'rb') as valid_file:
+        validation_problem1 = pickle.load(valid_file)
+    bg_hard = to_cuda(dgl.batch([p[0].g for p in validation_problem0[:test_episode]]))
+    bg_easy = to_cuda(dgl.batch([p[0].g for p in validation_problem1[:test_episode]]))
 
-bg_subopt = []
-for i in range(test_episode):
-    gi = to_cuda(validation_problem0[:test_episode][i][0].g)
-    problem.reset_label(g=gi, label=validation_problem0[:test_episode][i][2])
-    bg_subopt.append(gi)
-bg_subopt = dgl.batch(bg_subopt)
+    bg_subopt = []
+    for i in range(test_episode):
+        gi = to_cuda(validation_problem0[:test_episode][i][0].g)
+        problem.reset_label(g=gi, label=validation_problem0[:test_episode][i][2])
+        bg_subopt.append(gi)
+    bg_subopt = dgl.batch(bg_subopt)
 
-if ajr == 8:
-    bg_hard.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_hard.batch_size)
-    bg_easy.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_easy.batch_size)
-    bg_subopt.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_subopt.batch_size)
+    if ajr == 8:
+        bg_hard.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_hard.batch_size)
+        bg_easy.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_easy.batch_size)
+        bg_subopt.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_subopt.batch_size)
 
 
 def run_dqn(alg):
@@ -202,7 +209,7 @@ def run_dqn(alg):
 
         T11 = time.time()
         # TODO memory usage :: episode_len * num_episodes * hidden_dim
-        log, sample_buffer = alg.train_dqn(epoch=n_iter, batch_size=batch_size, num_episodes=n_episode, episode_len=episode_len, gnn_step=gnn_step, q_step=q_step, ddqn=ddqn)
+        log = alg.train_dqn(epoch=n_iter, batch_size=batch_size, num_episodes=n_episode, episode_len=episode_len, gnn_step=gnn_step, q_step=q_step, ddqn=ddqn)
         if n_iter % target_update_step == target_update_step - 1:
             alg.update_target_net()
         T22 = time.time()
@@ -227,7 +234,7 @@ def run_dqn(alg):
         # validation
 
         # test summary
-        if n_iter % 100 == 0:
+        if n_iter % 100 == 0 and run_validation:
             test = test_summary(alg=alg, problem=test_problem, q_net=readout, forbid_revisit=0)
 
             test.run_test(problem=to_cuda(bg_hard), trial_num=1, batch_size=100, gnn_step=gnn_step,
@@ -247,12 +254,13 @@ def run_dqn(alg):
 
         writer.add_scalar('Reward/Training Episode Reward', log.get_current('tot_return') / n_episode, n_iter)
         writer.add_scalar('Loss/Q-Loss', log.get_current('Q_error'), n_iter)
-        writer.add_scalar('Reward/Validation Episode Reward - hard', epi_r0, n_iter)
-        writer.add_scalar('Reward/Validation Episode Reward - easy', epi_r1, n_iter)
-        writer.add_scalar('Reward/Validation Episode Reward - subopt', epi_r2, n_iter)
-        writer.add_scalar('Reward/Validation Opt. hit percent - hard', best_hit0, n_iter)
-        writer.add_scalar('Reward/Validation Opt. hit percent - easy', best_hit1, n_iter)
-        writer.add_scalar('Reward/Validation Opt. hit percent - subopt', best_hit2, n_iter)
+        if run_validation:
+            writer.add_scalar('Reward/Validation Episode Reward - hard', epi_r0, n_iter)
+            writer.add_scalar('Reward/Validation Episode Reward - easy', epi_r1, n_iter)
+            writer.add_scalar('Reward/Validation Episode Reward - subopt', epi_r2, n_iter)
+            writer.add_scalar('Reward/Validation Opt. hit percent - hard', best_hit0, n_iter)
+            writer.add_scalar('Reward/Validation Opt. hit percent - easy', best_hit1, n_iter)
+            writer.add_scalar('Reward/Validation Opt. hit percent - subopt', best_hit2, n_iter)
         writer.add_scalar('Time/Running Time per Epoch', T2 - T1, n_iter)
 
 if __name__ == '__main__':

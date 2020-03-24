@@ -41,6 +41,8 @@ class test_summary:
 
         self.all_states = list(set([state2QtableKey(x) for x in list(itertools.permutations([0, 0, 0, 1, 1, 1, 2, 2, 2], 9))]))
 
+        self.state_eval = []
+
     # need to adapt from Canonical_solvers.py
     def cmpt_optimal(self, graph, path=None):
 
@@ -94,14 +96,18 @@ class test_summary:
             res.append(res[-1] - r.item())
         return QtableKey2state(state2QtableKey(pb.g.ndata['label'].argmax(dim=1).cpu().numpy())), R, res
 
-    def test_dqn(self, alg, g_i, t, path=None):
+    def test_dqn(self, alg, g_i, t, init_label=None, path=None):
 
         init_state = dc(self.episodes[g_i].init_state)
         label_history = init_state.ndata['label'][self.episodes[g_i].label_perm]
 
         self.problem.g = dc(init_state)
-        self.problem.reset_label(label=label_history[0].argmax(dim=1))
-        self.problem.calc_S()
+        if init_label is None:
+            self.problem.reset_label(label=label_history[0].argmax(dim=1))
+        else:
+            self.problem.reset_label(label=init_label)
+        S = self.problem.calc_S()
+        print('init S:', S)
         if path is not None:
             path = os.path.abspath(os.path.join(os.getcwd())) + path
             vis_g(self.problem, name=path + str(0), topo='cut')
@@ -115,8 +121,71 @@ class test_summary:
             print('action index:', torch.argmax(Q_sa).detach().cpu().item())
             print('action:', actions[torch.argmax(Q_sa)].detach().cpu().numpy())
             print('reward:', r.item())
+            S -= r.item()
+            print('kcut S:', S)
             if path is not None:
                 vis_g(self.problem, name=path + str(i+1), topo='cut')
+
+    def get_state_eval_from_aux(self, bg, alg, aux):
+        dummy_actions = torch.zeros(bg.batch_size, 2).int().cuda()
+        S_enc, _, _, _ = alg.forward(bg, dummy_actions, gnn_step=3, aux_output=True)
+
+        actions = self.problem.get_legal_actions(state=bg)
+        _, _, _, q = alg.forward(bg, actions, gnn_step=3)
+
+        # select top-k largest q-values
+        q_topk = q.view(bg.batch_size, -1).sort(dim=1).values[:, -5:]  # (b, 5)
+        # q_bottomk = q.view(bg.batch_size, -1).sort(dim=1).values[:, :5]  # (b, 5)
+        q_a0 = q.view(bg.batch_size, -1)[:, -1:]  # (b, 1)
+        q_avg = q.view(bg.batch_size, -1).mean(dim=1).unsqueeze(1)  # (b, 1)
+        q_std = q.view(bg.batch_size, -1).std(dim=1).unsqueeze(1)  # (b, 1)
+        # manual_features = extract_manual_feature(bg, k, m)  # (b, 3k+12)
+
+        S_enc = torch.cat([S_enc, q_a0, q_topk, q_avg, q_std], dim=1)
+        _, _, _, state_eval = aux.forward_state_eval(bg, S_enc, gnn_step=3)
+
+        return state_eval
+
+    def test_init_state(self, alg, aux, g_i, t, trial_num=10):
+
+        init_state = dc(self.episodes[g_i].init_state)
+
+        init_states_label = [QtableKey2state(key) for key in np.random.choice(self.all_states, trial_num, replace=False)]
+
+        evals = []
+        for k in range(trial_num):
+
+            print('trial:', k)
+            self.problem.g = dc(init_state)
+
+            self.problem.reset_label(label=init_states_label[k])
+            print('init state:', init_states_label[k])
+            S = self.problem.calc_S()
+
+            bg = dgl.batch([self.problem.g])
+
+            state_eval = self.get_state_eval_from_aux(bg, alg, aux)
+
+            evals.append(state_eval.detach().item())
+            print('state_eval:', state_eval)
+
+            # print('init S:', S)
+
+            for i in range(t):
+
+                actions = self.problem.get_legal_actions(state=self.problem.g)
+                S_a_encoding, h1, h2, Q_sa = alg.forward(to_cuda(self.problem.g), actions.cuda(), gnn_step=3)
+                _, r = self.problem.step(state=self.problem.g, action=actions[torch.argmax(Q_sa)])
+                S -= r.item()
+
+                # print(Q_sa.detach().cpu().numpy())
+                # print('action index:', torch.argmax(Q_sa).detach().cpu().item())
+                # print('action:', actions[torch.argmax(Q_sa)].detach().cpu().numpy())
+                # print('reward:', r.item())
+                # print('kcut S:', S)
+
+            print(S)
+        return init_states_label[torch.tensor(evals).argmax()]
 
     def compare_result(self):
 
@@ -127,7 +196,8 @@ class test_summary:
             grd, R, rs = self.test_greedy(self.episodes[gi].init_state)
             self.test_dqn(self.alg, gi, 7)
 
-    def run_test(self, problem=None, trial_num=1, batch_size=100, gnn_step=3, episode_len=50, explore_prob=0.1, Temperature=1.0):
+    def run_test(self, problem=None, init_trial=10, trial_num=1, batch_size=100, gnn_step=3, episode_len=50, explore_prob=0.1, Temperature=1.0, aux_model=None, beta=0):
+        self.episode_len = episode_len
         self.num_actions = self.problem.N * (self.problem.N - self.problem.m) // 2 + 1
         self.trial_num = trial_num
         self.batch_size = batch_size
@@ -138,11 +208,23 @@ class test_summary:
             gl = dgl.unbatch(self.bg)
             test_problem = self.problem
         else:
-            # for validation problem set
-            self.bg = problem
-            gl = dgl.unbatch(self.bg)
-            self.problem.g = self.bg
-            test_problem = self.problem
+            if aux_model is not None and init_trial > 1:
+                gg = []
+                gl = dgl.unbatch(problem)
+                for i in range(batch_size):
+                    init_label_i = self.test_init_state(alg=self.alg, aux=aux_model, g_i=i, t=episode_len, trial_num=init_trial)
+                    self.problem.g = gl[i]
+                    self.problem.reset_label(label=init_label_i)
+                    gg.append(dc(self.problem.g))
+                self.bg = dgl.batch(gg)
+                self.problem.g = self.bg
+                test_problem = self.problem
+            else:
+                # for validation problem set
+                self.bg = problem
+                gl = dgl.unbatch(self.bg)
+                self.problem.g = self.bg
+                test_problem = self.problem
 
         self.action_mask = torch.tensor(range(0, self.num_actions * batch_size, self.num_actions)).cuda()
 
@@ -150,6 +232,9 @@ class test_summary:
 
         ep = [EpisodeHistory(gl[i], max_episode_len=episode_len, action_type='swap') for i in range(batch_size)]
         self.end_of_episode = {}.fromkeys(range(batch_size), episode_len-1)
+        loop_start_position = [0] * self.batch_size
+        loop_remain_index = set(range(self.batch_size))
+        self.valid_states = [[ep[i].init_state] for i in range(self.batch_size)]
         for i in tqdm(range(episode_len)):
             batch_legal_actions = test_problem.get_legal_actions(state=self.bg, action_type='swap').cuda()
 
@@ -181,6 +266,26 @@ class test_summary:
             else:
                 S_a_encoding, h1, h2, Q_sa = self.alg.forward_MHA(self.bg, batch_legal_actions, gnn_step=gnn_step)
 
+            if beta > 0:
+                self.problem.sample_episode *= self.num_actions
+                self.problem.gen_step_batch_mask()
+
+
+
+                new_bg, _ = self.problem.step_batch(states=dgl.batch([self.bg] * self.num_actions),
+                                                    action=batch_legal_actions.view(batch_size, self.num_actions,
+                                                                                    2).transpose(0, 1).reshape(-1, 2),
+                                                    return_sub_reward=False)
+                self.problem.sample_episode = self.problem.sample_episode // self.num_actions
+                self.problem.gen_step_batch_mask()
+
+                state_eval = self.get_state_eval_from_aux(new_bg, self.alg, aux_model)
+
+                state_eval = state_eval.view(-1, batch_size).t().reshape(batch_size * self.num_actions)
+                self.state_eval.append(state_eval.view(batch_size, self.num_actions))
+
+                Q_sa -= state_eval * beta
+
             terminate_episode = (Q_sa.view(-1, self.num_actions).max(dim=1).values < 0.).nonzero().flatten().cpu().numpy()
 
             for idx in terminate_episode:
@@ -196,17 +301,32 @@ class test_summary:
 
             actions = batch_legal_actions[chose_actions]
 
-            _, rewards, sub_rewards = self.problem.step_batch(states=self.bg, action=actions, return_sub_reward=True)
-
+            new_states, rewards = self.problem.step_batch(states=self.bg, action=actions)
             R = [reward.item() for reward in rewards]
 
             enc_states = [state2QtableKey(self.bg.ndata['label'][k * self.n: (k + 1) * self.n].argmax(dim=1).cpu().numpy()) for k in range(batch_size)]
 
             [ep[k].write(action=actions[k, :], action_idx=best_actions[k] - self.action_mask[k], reward=R[k]
-                         , q_val=Q_sa.view(-1, self.num_actions)[k, :]
-                         , actions=batch_legal_actions.view(-1, self.num_actions, 2)[k, :, :]
-                         , state_enc=enc_states[k]
-                         , sub_reward=sub_rewards[:, k].cpu().numpy()) for k in range(batch_size)]
+                     , q_val=Q_sa.view(-1, self.num_actions)[k, :]
+                     , actions=batch_legal_actions.view(-1, self.num_actions, 2)[k, :, :]
+                     , state_enc=enc_states[k]
+                     # , sub_reward=sub_rewards[:, k].cpu().numpy()
+                     ,sub_reward=None
+                     , loop_start_position=loop_start_position[k]) for k in range(batch_size)]
+
+            # # write valid sample episode for training aux model
+            # tmp = set()
+            # for k in loop_remain_index:
+            #     if enc_states[k] in ep[k].enc_state_seq[-4: -1]:
+            #         loop_start_position[k] = i
+            #         tmp.add(k)
+            #     else:
+            #         label = ep[k].init_state.ndata['label'][ep[k].label_perm[-1]]
+            #         l = label.argmax(dim=1)
+            #         self.problem.g = dc(ep[k].init_state)
+            #         self.problem.reset_label(label=l)
+            #         self.valid_states[k].append(dc(self.problem.g))
+            # loop_remain_index = loop_remain_index.difference(tmp)
 
         self.episodes = ep
 
@@ -224,6 +344,51 @@ class test_summary:
                 bingo += 1
         print('Optimal solution hit percentage:', bingo)
         return bingo
+
+    def collect_sample_episode(self, criteria='sway-2'):
+
+        posi_episode_idx = set([i for i in range(len(self.episodes)) if self.episodes[i].action_seq[-1][0] * 10000 + self.episodes[i].action_seq[-1][1]==0])
+
+        bg = []
+        flag = []
+        for i in range(self.episodes.__len__()):
+            bg.extend(self.valid_states[i])
+            if i in posi_episode_idx:
+                flag.extend([0] * len(self.valid_states[i]))
+            else:
+                flag.extend([1] * len(self.valid_states[i]))
+        # for i in range(self.episodes.__len__()):
+        #     a1 = self.episodes[i].action_seq[-1][0] * 10000 + self.episodes[i].action_seq[-1][1]
+        #     a2 = self.episodes[i].action_seq[-2][0] * 10000 + self.episodes[i].action_seq[-2][1]
+        #     if a1 == a2 and a1 > 0:
+        #         init_state = dc(self.episodes[i].init_state)
+        #         label = init_state.ndata['label'][self.episodes[i].label_perm[-2:]]
+        #         l0 = label[0].argmax(dim=1)
+        #         l1 = label[1].argmax(dim=1)
+        #         self.problem.g = dc(init_state)
+        #         self.problem.reset_label(label=l0)
+        #         bg.append(dc(self.problem.g))
+        #         flag.append(1)
+        #         self.problem.reset_label(label=l1)
+        #         bg.append(dc(self.problem.g))
+        #         flag.append(1)
+        #
+        #
+        #     elif a1 == 0 and a2 == 0:
+        #
+        #         init_state = dc(self.episodes[i].init_state)
+        #         for j in range(self.episode_len):
+        #             a = self.episodes[i].action_seq[j][0] * 10000 + self.episodes[i].action_seq[j][1]
+        #             if a > 0:
+        #
+        #                 label = init_state.ndata['label'][self.episodes[i].label_perm[j]]
+        #                 l = label.argmax(dim=1)
+        #                 self.problem.g = dc(init_state)
+        #                 self.problem.reset_label(label=l)
+        #                 bg.append(dc(self.problem.g))
+        #                 flag.append(0)
+
+        return bg, flag
 
     def show_result(self):
         # print(self.end_of_episode)

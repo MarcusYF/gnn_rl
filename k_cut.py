@@ -22,7 +22,7 @@ def is_identical(G1, G2):
 
 class GraphGenerator:
 
-    def __init__(self, k, m, ajr):
+    def __init__(self, k, m, ajr, style='plain'):
 
         self.k = k
         self.m = m
@@ -32,6 +32,7 @@ class GraphGenerator:
         self.src = [i // self.n for i in self.nonzero_idx]
         self.dst = [i % self.n for i in self.nonzero_idx]
         self.adj_mask = torch.tensor(range(0, self.n ** 2, self.n)).unsqueeze(1).expand(self.n, ajr + 1)
+        self.style = style
 
     def generate_G(self, x=None, label=None, hidden_dim=16, a=1):
 
@@ -75,13 +76,15 @@ class GraphGenerator:
 
         return g
 
-    def generate_batch_G(self, x=None, batch_size=1, hidden_dim=16, a=1):
+    def generate_batch_G(self, x=None, batch_size=1, hidden_dim=16, a=1, style=None):
 
         # init graph
         k = self.k
         m = self.m
         n = self.n
         ajr = self.ajr
+        if style is None:
+            style = self.style
 
         # init batch graphs
         gs = [dgl.DGLGraph() for i in range(batch_size)]
@@ -91,7 +94,14 @@ class GraphGenerator:
 
         # 2-d coordinates 'x'
         if x is None:
-            bg.ndata['x'] = torch.rand((batch_size * n, 2))
+            if style == 'plain':
+                bg.ndata['x'] = torch.rand((batch_size * n, 2))
+            elif style == 'shift':
+                bg.ndata['x'] = torch.rand((batch_size * n, 2)) * 10 + 5
+            elif style == 'cluster':
+                center = torch.rand((batch_size * k, 1, 1)).repeat(1, m, 2) * 10
+                bg.ndata['x'] = (center + torch.rand((batch_size * k, m, 2))).view(batch_size * n, 2)
+
         else:
             bg.ndata['x'] = x
 
@@ -189,8 +199,8 @@ class GraphGenerator:
 
 class KCut_DGL:
 
-    def __init__(self, k, m, adjacent_reserve, hidden_dim, mode='complete', x=None, label=None, a=1, sample_episode=10):
-        self.graph_generator = GraphGenerator(k=k, m=m, ajr=adjacent_reserve)
+    def __init__(self, k, m, adjacent_reserve, hidden_dim, mode='complete', x=None, label=None, a=1, graph_style='plain', sample_episode=10):
+        self.graph_generator = GraphGenerator(k=k, m=m, ajr=adjacent_reserve, style=graph_style)
         self.g = self.graph_generator.generate_G(x=x, label=label, hidden_dim=hidden_dim, a=a)
         self.N = k * m
         self.k = k  # num of clusters
@@ -241,9 +251,9 @@ class KCut_DGL:
         else:
             actions.view(bg.batch_size, -1, 2)  # (b, num_action, 2)
 
-    def gen_batch_graph(self, x=None, batch_size=1, hidden_dim=16, a=1):
+    def gen_batch_graph(self, x=None, batch_size=1, hidden_dim=16, a=1, style='plain'):
         # return [self.graph_generator.generate_G(x=self.x, label=self.label, a=self.a) for i in range(batch_size)]
-        return self.graph_generator.generate_batch_G(x=x, batch_size=batch_size, hidden_dim=hidden_dim, a=a)
+        return self.graph_generator.generate_batch_G(x=x, batch_size=batch_size, hidden_dim=hidden_dim, a=a, style=style)
 
     def reset(self, compute_S=True):
         self.g = self.graph_generator.generate_G(x=self.x, label=self.label, a=self.a)
@@ -275,6 +285,16 @@ class KCut_DGL:
         if g is None and calc_S:
             self.S = self.calc_S()
         return g
+
+    def set_batch_label(self, bg, label):
+        bg.ndata['label'] = torch.nn.functional.one_hot(label, self.k).float().cuda()
+        # rewire edges
+        n = bg.ndata['label'].shape[0] // bg.batch_size
+        nonzero_idx = [i for i in range(n ** 2) if i % (n + 1) != 0]
+        bg.edata['e_type'][:, 1] = torch.bmm(bg.ndata['label'].view(bg.batch_size, n, -1),
+                                                 bg.ndata['label'].view(bg.batch_size, n, -1).transpose(1,
+                                                                                                         2)).view(
+            bg.batch_size, -1)[:, nonzero_idx].view(-1)
 
     def get_legal_actions(self, state=None, update=False, action_type='swap', action_dropout=1.0, pause_action=True):
 
@@ -485,7 +505,7 @@ class KCut_DGL:
             #
             # rewards = (old_S - new_S) / 2
 
-            if True:
+            if False:
                 # compute old S
                 #  (b, k, n*(n-1))
                 group_matrix_k = torch.bmm(
@@ -563,10 +583,8 @@ class KCut_DGL:
 
             rewards = (old_S - new_S) / 2
 
-        if return_sub_reward:
-            return states, rewards, sub_rewards
-        else:
-            return states, rewards
+
+        return states, rewards
 
 
 def udf_u_mul_e(edges):
@@ -576,15 +594,16 @@ def udf_u_mul_e(edges):
     # print('d shape:', edges.data['d'].shape)
     return {
         'm_n1_h': edges.src['h'] * edges.data['e_type'][:, 0].unsqueeze(1)
-        , 'm_n1_hd': torch.cat([edges.src['h'], edges.data['d']], dim=1) * edges.data['e_type'][:, 0].unsqueeze(1)
+        # , 'm_n2_h': edges.src['h'] * edges.data['e_type'][:, 1].unsqueeze(1)
+        # , 'm_n1_hd': torch.cat([edges.src['h'], edges.data['d']], dim=1) * edges.data['e_type'][:, 0].unsqueeze(1)
         # , 'm_n1_v': edges.src['h'] * edges.data['w'] * edges.data['e_type'][:, 0].unsqueeze(1)
-        , 'm_n1_w': edges.data['w'] * edges.data['e_type'][:, 0].unsqueeze(1)
+        # , 'm_n1_w': edges.data['w'] * edges.data['e_type'][:, 0].unsqueeze(1)
         , 'm_n1_d': edges.data['d'] * edges.data['e_type'][:, 0].unsqueeze(1)
-        , 'm_n_w': edges.data['w']
-        , 'm_n_d': edges.data['d']
+        # , 'm_n_w': edges.data['w']
+        # , 'm_n_d': edges.data['d']
         # , 'm_n2_v': edges.src['h'] * edges.data['w'] * edges.data['e_type'][:, 1].unsqueeze(1)
         # , 'm_n2_w': edges.data['w'] * edges.data['e_type'][:, 1].unsqueeze(1)
-        , 'm_n2_d': edges.data['d'] * edges.data['e_type'][:, 1].unsqueeze(1)
+        # , 'm_n2_d': edges.data['d'] * edges.data['e_type'][:, 1].unsqueeze(1)
         }
 
 
@@ -594,14 +613,16 @@ def reduce(nodes):
     # n1_e = nodes.mailbox['m_n1_d']
     # n2_e = nodes.mailbox['m_n2_d']
 
-    n1_h = torch.sum(nodes.mailbox['m_n1_h'], 1)
-    n1_w = nodes.mailbox['m_n1_w']
+    # n1_h = torch.sum(nodes.mailbox['m_n1_h'], 1)
+    # n1_w = nodes.mailbox['m_n1_w']
     n1_hd = nodes.mailbox['m_n1_h']
+    # n2_hd = nodes.mailbox['m_n2_h']
     n1_d = nodes.mailbox['m_n1_d']
-    n2_d = nodes.mailbox['m_n2_d']
-    n_w = nodes.mailbox['m_n_w']
-    n_d = nodes.mailbox['m_n_d']
-    return {'n1_h': n1_h, 'n1_hd': n1_hd, 'n1_w': n1_w, 'n1_d': n1_d, 'n2_d': n2_d, 'n_w': n_w, 'n_d': n_d}
+    # n2_d = nodes.mailbox['m_n2_d']
+    # n_w = nodes.mailbox['m_n_w']
+    # n_d = nodes.mailbox['m_n_d']
+    return {'n1_hd': n1_hd, 'n1_d': n1_d}
+    # return {'n1_h': n1_h, 'n1_hd': n1_hd, 'n2_hd': n2_hd, 'n1_w': n1_w, 'n1_d': n1_d, 'n2_d': n2_d, 'n_w': n_w, 'n_d': n_d}
     # return {'n1_v': n1_v, 'n2_v': n2_v, 'n1_e': n1_e, 'n2_e': n2_e, 'n1_h': n1_h, 'n1_w': n1_w, 'n1_d': n1_d, 'n_w': n_w, 'n_d': n_d}
 
 
@@ -625,23 +646,27 @@ class NodeApplyModule(nn.Module):
         self.use_x = int(use_x)
 
     def forward(self, node):
-        x = node.data['x']
+        # x = node.data['x']
         l = node.data['label']
         # n1_v = node.data['n1_v']  # dist
         # n2_v = node.data['n2_v']  # group
         # n1_e = torch.sort(node.data['n1_e'], 1, descending=True)[0][:, 0: self.ajr].squeeze(2)
         # n2_e = torch.sort(node.data['n2_e'], 1, descending=True)[0][:, 0: self.m-1].squeeze(2)
 
-        n1_h = node.data['n1_h']
+        # n1_h = node.data['n1_h']
         n1_d = node.data['n1_d']  # reserved adjacent dist [d]
         n1_hd = node.data['n1_hd']  # reserved adjacent dist [h, d]
-        n2_d = node.data['n2_d']  # cluster dist
-        n1_w = node.data['n1_w']  # reserved adjacent weight
-        n_d = node.data['n_d']  # all dist
-        n_w = node.data['n_w']  # all weight
+        # n2_d = node.data['n2_d']  # cluster dist
+        # n2_hd = node.data['n2_hd']  # cluster dist [h, d]
+        # n1_w = node.data['n1_w']  # reserved adjacent weight
+        # n_d = node.data['n_d']  # all dist
+        # n_w = node.data['n_w']  # all weight
 
-        if self.edge_info == 'adj_weight':
-            h = self.activation(self.l0(x) * self.use_x + self.l1(l) + self.l2(n1_h) + self.t3(torch.sum(self.activation(self.t4(n1_w)), dim=1)), inplace=True)
+        # if self.edge_info == 'adj_weight':
+        #     h = self.activation(self.l0(x) * self.use_x + self.l1(l) + self.l2(n1_h) + self.t3(torch.sum(self.activation(self.t4(n1_w)), dim=1)), inplace=True)
+        # if self.edge_info == 'aux':
+        #     n2_h = torch.bmm(n2_hd.transpose(1, 2), n2_d).squeeze(2)
+        #     h = self.activation(self.l1(l) + self.l2(n2_h) + self.t3(torch.sum(self.activation(self.t4(n2_d)), dim=1)), inplace=True)
         if self.edge_info == 'adj_dist':
             n1_h = torch.bmm(n1_hd.transpose(1, 2), n1_d).squeeze(2)
             h = self.activation(self.l1(l) + self.l2(n1_h) + self.t3(torch.sum(self.activation(self.t4(n1_d)), dim=1)), inplace=True)
@@ -655,10 +680,10 @@ class NodeApplyModule(nn.Module):
             #                     + self.l2(n1_h)
             #                     + self.t3(torch.sum(self.activation(self.t4(n1_d)), dim=1)), inplace=True)
 
-        if self.edge_info == 'all_weight':
-            h = self.activation(self.l0(x) * self.use_x + self.l1(l) + self.l2(n1_h) + self.t3(torch.sum(self.activation(self.t4(n_w)), dim=1)), inplace=True)
-        if self.edge_info == 'all_dist':
-            h = self.activation(self.l0(x) * self.use_x + self.l1(l) + self.l2(n1_h) + self.t3(torch.sum(self.activation(self.t4(n_d)), dim=1)), inplace=True)
+        # if self.edge_info == 'all_weight':
+        #     h = self.activation(self.l0(x) * self.use_x + self.l1(l) + self.l2(n1_h) + self.t3(torch.sum(self.activation(self.t4(n_w)), dim=1)), inplace=True)
+        # if self.edge_info == 'all_dist':
+        #     h = self.activation(self.l0(x) * self.use_x + self.l1(l) + self.l2(n1_h) + self.t3(torch.sum(self.activation(self.t4(n_d)), dim=1)), inplace=True)
         # h = self.activation(self.l0(x) + self.l1(l)
         #                     + self.l2(n1_v)
         #                     # + self.l3(n2_v)
@@ -672,6 +697,7 @@ class GCN(nn.Module):
     def __init__(self, k, m, ajr, hidden_dim, activation, use_x=True, edge_info='adj_weight'):
         super(GCN, self).__init__()
         self.apply_mod = NodeApplyModule(k, m, ajr, hidden_dim, activation, use_x=use_x, edge_info=edge_info)
+        self.apply_mod2 = NodeApplyModule(k, m, ajr, hidden_dim, activation, use_x=use_x, edge_info='aux')
 
     def forward(self, g, feature):
         g.ndata['h'] = feature
@@ -681,6 +707,12 @@ class GCN(nn.Module):
         # g.ndata.pop('n2_v')
         # g.ndata.pop('n1_e')
         # g.ndata.pop('n2_e')
+        return g.ndata.pop('h')
+
+    def forward2(self, g, feature):
+        g.ndata['h'] = feature
+        g.update_all(udf_u_mul_e, reduce)
+        g.apply_nodes(func=self.apply_mod2)
         return g.ndata.pop('h')
 
 # gnn = GCN(3, 3, 5, 7, F.relu)
@@ -836,17 +868,25 @@ class DQNet(nn.Module):
         # self.t66 = nn.Linear(5, self.hidden_dim)
         # # for centroid graph representation
         # self.t5_ = nn.Linear((self.k + 2) * self.hidden_dim, 1)
-        # self.t6_ = nn.Linear(self.hidden_dim * self.k, self.hidden_dim * self.k)
+        self.t6_ = nn.Linear(self.hidden_dim * self.k, self.hidden_dim * self.k)
 
         self.t7 = nn.Linear(2 * self.hidden_dim, self.hidden_dim)
         # self.t7_ = nn.Linear(2 * self.true_dim + 2 * self.hidden_dim, self.hidden_dim)
         self.t9 = nn.Linear(2 * self.hidden_dim, self.hidden_dim)
+        self.t9_ = nn.Linear(3 * self.hidden_dim, self.hidden_dim)
         # self.t77 = nn.Linear(10, self.hidden_dim)
         self.t8 = nn.Linear(self.hidden_dim + self.k, self.hidden_dim)
 
         self.h_residual = []
         self.readout = readout
         self.info = ''
+
+        # params for S-eval net
+        self.u5 = nn.Linear(self.hidden_dim, 1)
+        self.u6 = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.u6_ = nn.Linear((self.k+1) * self.hidden_dim + 8, 2*self.hidden_dim)
+        self.u9 = nn.Linear(2*self.hidden_dim, self.hidden_dim)
+
 
     def forward_nognn(self, g, actions=None, action_type='swap', gnn_step=3, time_aware=False, remain_episode_len=None):
         if isinstance(g, BatchedDGLGraph):
@@ -894,7 +934,30 @@ class DQNet(nn.Module):
 
         return S_a_encoding, g.ndata['h'], g.ndata['h'], Q_sa
 
-    def forward(self, g, actions=None, action_type='swap', gnn_step=3, time_aware=False, remain_episode_len=None):
+    def forward_state_eval(self, g, S_enc, gnn_step=3):
+
+        batch_size = g.batch_size
+        h = torch.zeros((g.ndata['h'].shape[0], self.hidden_dim - self.k)).cuda()
+
+        for i in range(gnn_step):
+            for conv in self.layers:
+                h = conv.forward2(g, h)
+
+        g.ndata['h'] = torch.cat([h, g.ndata['label']], dim=1)
+        h_new = h
+
+        centroid = [g.ndata['h'][g.ndata['label'][:, ki] == 1].view(batch_size, self.k, -1).sum(dim=1) / self.m for ki in range(self.k)]
+        centroid.append(S_enc)
+        graph_embedding = F.relu(self.u6_(torch.cat(centroid, dim=1)))  # (b, (k + 1) * h)
+        # graph_embedding = self.u6(dgl.mean_nodes(g, 'h'))
+
+        S_encoding = self.u9(torch.cat([graph_embedding], dim=1))
+
+        S_eval = self.u5(F.relu(S_encoding, inplace=True)).squeeze()
+
+        return S_encoding, h_new, g.ndata['h'], S_eval
+
+    def forward(self, g, actions=None, action_type='swap', gnn_step=3, time_aware=False, remain_episode_len=None, aux_output=False):
 
         if self.readout == 'att':
             return self.forward_MHA(g=g, actions=actions, action_type=action_type, gnn_step=gnn_step, time_aware=time_aware, remain_episode_len=remain_episode_len)
@@ -935,7 +998,12 @@ class DQNet(nn.Module):
         #     batch_centroid.append(torch.mean(blocks_i.view(batch_size, self.m, self.hidden_dim), axis=1))
 
         if isinstance(g, BatchedDGLGraph):
-            # graph_embedding = self.t6_(torch.cat(batch_centroid, axis=1)).repeat(1, num_action).view(num_action * batch_size, -1) # batch_size * (h * k)
+
+            # centroid = [g.ndata['h'][g.ndata['label'][:, ki] == 1].view(batch_size, self.m, -1).sum(dim=1) / self.m for ki in range(self.k)]
+            # key = torch.cat(centroid, dim=1).view(batch_size, self.k, -1)  # (b, k, h)
+            # key = torch.cat([key, key], dim=2)  # (b, k, 2h)
+            # value = key  # (b, k, 2h)
+
             graph_embedding = self.t6(dgl.mean_nodes(g, 'h')).repeat(1, num_action).view(num_action * batch_size, -1)
         else:
             graph_embedding = self.t6(torch.mean(g.ndata['h'], dim=0)).repeat(num_action, 1)
@@ -950,22 +1018,19 @@ class DQNet(nn.Module):
         else:
             actions_ = actions
 
+
         if action_type == 'flip':
             q_actions = self.t8(torch.cat([g.ndata['h'][actions_[:, 0], :], torch.nn.functional.one_hot(actions_[:, 1], g.ndata['label'].shape[1]).float()], axis=1))
         if action_type == 'swap':
             # q_actions = torch.cat([g.ndata['h'][actions_[:, 0], :], g.ndata['h'][actions_[:, 1], :]], axis=1)
             q_actions = self.t7(torch.cat([g.ndata['h'][actions_[:, 0], :], g.ndata['h'][actions_[:, 1], :]], axis=1))
 
-            # gc_l0 = g.ndata['label'][actions_[:, 0], :].view(batch_size, -1, self.k).transpose(1, 2)  # (b, k, num_action)
-            # gc_l1 = g.ndata['label'][actions_[:, 1], :].view(batch_size, -1, self.k).transpose(1, 2)  # (b, k, num_action)
-            # gc_h = torch.bmm(g.ndata['h'].view(batch_size, self.n, -1).transpose(1, 2),\
-            #              g.ndata['label'].view(batch_size, self.n, -1)) / self.m  # (b, h+k, k)
-            #
-            # left_centriod = torch.bmm(gc_h, gc_l0).transpose(1, 2)[:, :, :self.true_dim].reshape(-1, self.true_dim)  # (b * num_action, h)
-            # right_centriod = torch.bmm(gc_h, gc_l1).transpose(1, 2)[:, :, :self.true_dim].reshape(-1, self.true_dim) # (b * num_action, h)
-            #
-            # q_actions = self.t7_(torch.cat([g.ndata['h'][actions_[:, 0], :], g.ndata['h'][actions_[:, 1], :], left_centriod, right_centriod], axis=1))
+        # Q = torch.cat([g.ndata['h'][actions_[:, 0], :], \
+        #                  g.ndata['h'][actions_[:, 1], :]], axis=1).view(batch_size, num_action, -1)
+        # # (b, num_action, 2h)
+        # graph_embedding = self.MHA(Q, key, value).view(batch_size*num_action, -1)  # (bg, num_action, 1, 2h)
         S_a_encoding = self.t9(torch.cat([graph_embedding, q_actions], axis=1))
+        # S_a_encoding = self.t9_(torch.cat([graph_embedding, q_actions], axis=1))
         # S_a_encoding = torch.cat([graph_embedding, q_actions], axis=1)
 
         Q_sa = self.t5(F.relu(S_a_encoding, inplace=True)).squeeze()
@@ -974,7 +1039,13 @@ class DQNet(nn.Module):
         # Q_sa = self.t5_(F.relu(S_a_encoding)).squeeze()
         # Q_sa = (Q_sa.view(n, n) + Q_sa.view(n, n).t()).view(n**2)
 
-        return S_a_encoding, h_new, g.ndata['h'], Q_sa
+
+
+
+        if aux_output:
+            return graph_embedding, h_new, g.ndata['h'], Q_sa
+        else:
+            return S_a_encoding, h_new, g.ndata['h'], Q_sa
 
     def forward_MHA(self, g, actions=None, action_type='swap', gnn_step=3, time_aware=False, remain_episode_len=None):
         n = self.n
@@ -1047,7 +1118,7 @@ class DQNet(nn.Module):
 
         q_c = q_h
 
-        Q = torch.cat([q_h, q_c], axis=2)
+        Q = torch.cat([q_h, q_c], axis=2)  # (bg, num_action, 4d)
 
         S_a_encoding = self.MHA(Q, key, value)# (bg, num_action, 1, 4d)
         # mN = dgl.mean_nodes(g, 'h')
