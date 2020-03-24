@@ -9,6 +9,13 @@
           </mappings>
         </serverdata>
       </paths>
+      <paths name="hcdm2">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/u/fy4bc/code/research/RL4CombOptm/gnn_rl" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
       <paths name="hcdm3">
         <serverdata>
           <mappings>
