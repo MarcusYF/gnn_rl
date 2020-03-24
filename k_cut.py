@@ -94,7 +94,7 @@ class GraphGenerator:
 
         # 2-d coordinates 'x'
         if x is None:
-            print(style)
+            print(stylepng)
             if style == 'plain':
                 bg.ndata['x'] = torch.rand((batch_size * n, 2))
             elif style == 'shift':
