@@ -1,0 +1,7 @@
+{
+  "python.pythonPath":
+    "C:\\Users\\han_j\\.virtualenvs\\GeneticAlgorithm-ZxecQC27\\scripts\\python.exe",
+  "python.formatting.provider": "yapf",
+  "editor.formatOnSave": false,
+  "editor.rulers": [88]
+}
