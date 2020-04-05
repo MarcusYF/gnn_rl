@@ -20,7 +20,7 @@
         <remote-mappings server-id="python@sftp://fy4bc@128.143.67.123:22anaconda3/bin/python">
           <settings>
             <list>
-              <mapping local-root="$PROJECT_DIR$" remote-root="/u/fy4bc/code/research/RL4CombOptm/gnn_rl" />
+              <mapping local-root="$PROJECT_DIR$" remote-root="/u/fy4bc/u/fy4bc/code/research/RL4CombOptm/gnn_rl" />
             </list>
           </settings>
         </remote-mappings>

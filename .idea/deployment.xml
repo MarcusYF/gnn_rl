@@ -19,7 +19,7 @@
       <paths name="hcdm3">
         <serverdata>
           <mappings>
-            <mapping deploy="/u/fy4bc/code/research/RL4CombOptm/gnn_rl" local="$PROJECT_DIR$" />
+            <mapping deploy="/u/fy4bc/code/research/RL4CombOptm/gnn_rl_v2" local="$PROJECT_DIR$" />
           </mappings>
         </serverdata>
       </paths>

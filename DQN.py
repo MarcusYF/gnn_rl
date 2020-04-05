@@ -13,8 +13,11 @@ import itertools
 from toy_models.Qiter import vis_g, state2QtableKey, QtableKey2state
 
 
-def to_cuda(G_):
-    G = dc(G_)
+def to_cuda(G_, copy=True):
+    if copy:
+        G = dc(G_)
+    else:
+        G = G_
     G.ndata['label'] = G.ndata['label'].cuda()
     G.edata['d'] = G.edata['d'].cuda()
     G.edata['e_type'] = G.edata['e_type'].cuda()
@@ -91,6 +94,7 @@ class sars:
     a: tuple
     r: float
     s1: DGLGraph
+    rollout_r: torch.tensor
 
 
 class DQN:
@@ -146,10 +150,18 @@ class DQN:
         self.log.add_log('entropy')
         self.log.add_log('R_signal')
 
-    def run_batch_episode(self, action_type='swap', gnn_step=3, episode_len=50, batch_size=10):
+    def _updata_lr(self, step, max_lr, min_lr, decay_step):
+        for g in self.optimizer.param_groups:
+            g['lr'] = max(max_lr / ((max_lr / min_lr) ** (step / decay_step) ), min_lr)
+
+    def run_batch_episode(self, target_bg=None, action_type='swap', gnn_step=3, episode_len=50, batch_size=10, rollout_step=1):
 
         sum_r = 0
-        bg = to_cuda(self.problem.gen_batch_graph(batch_size=batch_size))
+
+        if target_bg is None:
+            bg = to_cuda(self.problem.gen_batch_graph(batch_size=batch_size))
+        else:
+            bg = to_cuda(self.problem.gen_target_batch_graph(target_bg=target_bg, batch_size=batch_size))
         t = 0
 
         num_actions = self.problem.get_legal_actions(action_type=action_type, action_dropout=self.action_dropout).shape[0]
@@ -184,10 +196,10 @@ class DQN:
             g1 = [g for g in dgl.unbatch(dc(bg))]  # after_state
 
             if self.sample_batch_episode:
-                self.experience_replay_buffer.extend([sars(g0[i], actions[i], rewards[i], g1[i]) for i in range(batch_size)])
+                self.experience_replay_buffer.extend([sars(g0[i], actions[i], rewards[i], g1[i], torch.zeros((rollout_step)).cuda()) for i in range(batch_size)])
             else:  # using cascade buffer
 
-                self.cascade_replay_buffer[t].extend([sars(g0[i], actions[i], rewards[i], g1[i]) for i in range(batch_size)])
+                self.cascade_replay_buffer[t].extend([sars(g0[i], actions[i], rewards[i], g1[i], torch.zeros((rollout_step)).cuda()) for i in range(batch_size)])
 
                 if self.priority_sampling:
                     # compute prioritized weights
@@ -206,21 +218,23 @@ class DQN:
 
         return R
 
-    def sample_actions_from_q(self, Q_sa, num_actions, batch_size, Temperature=1):
+    def sample_actions_from_q(self, Q_sa, num_actions, batch_size, Temperature=1.0, eps=None, top_k=1):
 
         if self.explore_method == 'epsilon_greedy':
-
-            best_actions = Q_sa.view(-1, num_actions).argmax(dim=1)
+            # len = batch_size * topk  (g0_top1, g1_top1, ..., g0_top2, ...)
+            best_actions = Q_sa.view(batch_size, num_actions).topk(k=top_k, dim=1).indices.t().flatten()
 
         if self.explore_method == 'softmax' or self.explore_method == 'soft_dqn':
-            # print(T)
+
             best_actions = torch.multinomial(F.softmax(Q_sa.view(-1, num_actions) / Temperature), 1).view(-1)
 
-        explore_replace_mask = (torch.rand(batch_size) < self.eps).nonzero()
+        if eps is None:
+            eps = self.eps
+        explore_replace_mask = (torch.rand(batch_size * top_k) < eps).nonzero()
         explore_actions = torch.randint(high=num_actions, size=(explore_replace_mask.shape[0], )).cuda()
         best_actions[explore_replace_mask[:, 0]] = explore_actions
         # add action batch offset
-        best_actions += torch.tensor(range(0, num_actions * batch_size, num_actions)).cuda()
+        best_actions += torch.tensor(range(0, num_actions * batch_size, num_actions)).repeat(top_k).cuda()
         return best_actions
 
     def prune_actions(self, bg, recent_states):
@@ -247,44 +261,114 @@ class DQN:
 
         return batch_legal_actions
 
-    def run_cascade_episode(self, action_type='swap', gnn_step=3):
+    def rollout(self, bg, num_actions, rollout_step, top_num=5):
+
+        batch_size = self.new_epi_batch_size * self.buf_epi_len * top_num
+        rollout_rewards = torch.zeros((batch_size, rollout_step)).cuda()
+        for step in range(rollout_step):
+            batch_legal_actions = self.problem.get_legal_actions(state=bg, action_type=self.action_type,
+                                                                 action_dropout=self.action_dropout).cuda()
+
+            _, _, _, Q_sa = self.model(bg, batch_legal_actions)
+
+            chosen_actions = self.sample_actions_from_q(Q_sa, num_actions, batch_size, eps=0.0, top_k=1)
+            _actions = batch_legal_actions[chosen_actions]
+
+            # update bg inplace and calculate batch rewards
+            _, _rewards = self.problem.step_batch(states=bg, action=_actions)
+
+            rollout_rewards[:, step] = _rewards
+            # print('step', step, rewards)
+        return rollout_rewards
+
+    def run_cascade_episode(self, target_bg=None, action_type='swap', gnn_step=3, q_step=1, rollout_step=0, verbose=False):
 
         sum_r = 0
-        new_graphs = [to_cuda(self.problem.gen_batch_graph(batch_size=self.new_epi_batch_size))]
 
+        T0 = time.time()
+
+        # generate new start states
+        if target_bg is None:
+            new_graphs = dgl.unbatch(to_cuda(self.problem.gen_batch_graph(batch_size=self.new_epi_batch_size), copy=False))
+        else:
+            new_graphs = dgl.unbatch(to_cuda(self.problem.gen_target_batch_graph(target_bg=target_bg, batch_size=self.new_epi_batch_size), copy=False))
+        if verbose:
+            T1 = time.time(); print('t1', T1 - T0)
+
+        # extend previous states
         new_graphs.extend(list(itertools.chain(*[[tpl.s1 for tpl in self.cascade_replay_buffer[i][-self.new_epi_batch_size:]] for i in range(self.buf_epi_len-1)])))
+        if verbose:
+            T2 = time.time(); print('t2', T2 - T1)
+
+        # make batch and copy new states
         bg = to_cuda(dgl.batch(new_graphs))
+        if verbose:
+            T3 = time.time(); print('t3', T3 - T2)
 
         batch_size = self.new_epi_batch_size * self.buf_epi_len
         num_actions = self.problem.get_legal_actions(action_type=action_type, action_dropout=self.action_dropout).shape[0]
-
+        if verbose:
+            T4 = time.time(); print('t4', T4 - T3)
         # recent_states = list(itertools.chain(
         #     *[[tpl.recent_states for tpl in self.cascade_replay_buffer[t][-self.new_epi_batch_size:]] for t in
         #       range(self.buf_epi_len - 1)]))
         #
         # batch_legal_actions = self.prune_actions(bg, recent_states)
-        batch_legal_actions = self.problem.get_legal_actions(state=bg, action_type=self.action_type,
-                                                             action_dropout=self.action_dropout).cuda()
 
+
+        batch_legal_actions = self.problem.get_legal_actions(state=bg, action_type=self.action_type,
+                                                                 action_dropout=self.action_dropout).cuda()
+        if verbose:
+            T5 = time.time(); print('t5', T5 - T4)
         # epsilon greedy strategy
         # TODO: multi-gpu parallelization
-        _, _, _, Q_sa = self.model(dc(bg), batch_legal_actions, action_type=action_type, gnn_step=gnn_step)
+        _, _, _, Q_sa = self.model(bg, batch_legal_actions, action_type=action_type, gnn_step=gnn_step)
+        if verbose:
+            T6 = time.time(); print('t6', T6 - T5)
 
-        # TODO: can alter explore strength according to kcut_valueS
-        chosen_actions = self.sample_actions_from_q(Q_sa, num_actions, batch_size, Temperature=self.eps)
-        actions = batch_legal_actions[chosen_actions]
+        if not rollout_step:
+            # TODO: can alter explore strength according to kcut_valueS
+            chosen_actions = self.sample_actions_from_q(Q_sa, num_actions, batch_size, Temperature=self.eps)
+            actions = batch_legal_actions[chosen_actions]
+            rollout_rewards = torch.zeros(batch_size, 1)
+        else:
+            print('xxxxxxxxxxxxx')
+            top_num = 10  # rollout for how many top actions
+            rollout_bg = dgl.batch([bg] * top_num)
+
+            # chosen_actions - len = batch_size * topk
+            chosen_actions = self.sample_actions_from_q(Q_sa, num_actions, batch_size, Temperature=self.eps, top_k=top_num)
+
+            topk_actions = batch_legal_actions[chosen_actions]
+
+            bg1, rewards1 = self.problem.step_batch(states=rollout_bg, action=topk_actions)
+
+            rollout_rewards = self.rollout(bg=bg1, num_actions=num_actions, rollout_step=rollout_step, top_num=top_num)
+
+            # select actions based on rollout rewards
+            # rollout_selected_actions = torch.cat([rewards1.view(-1, 1), rollout_rewards], dim=1)\
+            rollout_selected_actions = torch.cat([rollout_rewards], dim=1)\
+                .cumsum(dim=1).max(dim=1)\
+                .values.view(top_num, -1)\
+                .argmax(dim=0) * batch_size + torch.tensor(range(batch_size)).cuda()
+
+            # update bg inplace and calculate batch rewards
+            actions = topk_actions[rollout_selected_actions, :]
+            # rewards = rewards1[rollout_selected_actions]
+            rollout_rewards = rollout_rewards[rollout_selected_actions, :]
 
         # update bg inplace and calculate batch rewards
-        g0 = [g for g in dgl.unbatch(dc(bg))]  # current_state
         _, rewards = self.problem.step_batch(states=bg, action=actions)
-        g1 = [g for g in dgl.unbatch(dc(bg))]  # after_state
 
+        g0 = new_graphs  # current_state
+        g1 = [g for g in dgl.unbatch(bg)]  # after_state
 
         [self.cascade_replay_buffer[t].extend(
             [sars(g0[j+t*self.new_epi_batch_size]
             , actions[j+t*self.new_epi_batch_size]
             , rewards[j+t*self.new_epi_batch_size]
-            , g1[j+t*self.new_epi_batch_size])
+            , g1[j+t*self.new_epi_batch_size]
+            , rollout_rewards[j+t*self.new_epi_batch_size, :])
             for j in range(self.new_epi_batch_size)])
          for t in range(self.buf_epi_len)]
 
@@ -297,10 +381,12 @@ class DQN:
             # delta = (Q_sa[chosen_actions] - (rewards + self.gamma * Q_sa_next.view(-1, num_actions).max(dim=1).values)) / torch.clamp(torch.abs(Q_sa[chosen_actions]),0.1)
             self.cascade_replay_buffer_weight = torch.cat([self.cascade_replay_buffer_weight, torch.abs(delta.detach().cpu().view(self.buf_epi_len, self.new_epi_batch_size))], dim=1).detach()
             # print(self.cascade_replay_buffer_weight)
+
         R = [reward.item() for reward in rewards]
         sum_r += sum(R)
 
         self.log.add_item('tot_return', sum_r)
+
 
         return R
 
@@ -328,15 +414,15 @@ class DQN:
 
         return torch.cat(R), Q
 
-    def sample_from_cascade_buffer(self, batch_size, q_step, gnn_step):
+    def sample_from_cascade_buffer(self, batch_size, q_step, gnn_step, rollout_step=0, verbose=False):
 
         batch_size = min(batch_size, len(self.cascade_replay_buffer[0]) * self.buf_epi_len)
 
+        T0 = time.time()
         if self.priority_sampling:
             nc = self.cascade_replay_buffer_weight.shape[1]
             selected_indices = torch.multinomial((0.1 + self.cascade_replay_buffer_weight.flatten()) ** 1.0, batch_size)
             sample_buffer = [self.cascade_replay_buffer[indices // nc][indices % nc] for indices in selected_indices]
-
         else:
             if False:
                 # importance sampling according to S
@@ -354,24 +440,42 @@ class DQN:
                                                                     , replace=False
                                                                     # , p=
                                                                     ) for i in range(self.buf_epi_len)]))
+        if verbose:
+            T1 = time.time(); print('sampling:', T1-T0)
 
         # make batches
         batch_begin_state = dgl.batch([tpl.s0 for tpl in sample_buffer])
         batch_end_state = dgl.batch([tpl.s1 for tpl in sample_buffer])
         R = [tpl.r.unsqueeze(0) for tpl in sample_buffer]
 
-        batch_begin_action = torch.cat([tpl.a.unsqueeze(0) for tpl in sample_buffer], axis=0)
+        if rollout_step:
+            rollout_R = torch.cat([tpl.rollout_r.unsqueeze(0) for tpl in sample_buffer])
+            rollout_episode_R = rollout_R[:, 1:].cumsum(dim=1).max(dim=1).values
 
+        batch_begin_action = torch.cat([tpl.a.unsqueeze(0) for tpl in sample_buffer], axis=0)
         batch_end_action = self.problem.get_legal_actions(state=batch_end_state, action_type=self.action_type, action_dropout=self.action_dropout).cuda()
         action_num = batch_end_action.shape[0] // batch_begin_action.shape[0]
+        if verbose:
+            T2 = time.time(); print('make batch:', T2 - T1)
 
         # only compute limited number for Q_s1a
         # TODO: multi-gpu parallelization
         _, _, _, Q_s1a_ = self.model(batch_begin_state, batch_begin_action, action_type=self.action_type, gnn_step=gnn_step)
+        if verbose:
+            T3 = time.time(); print('forward:', T3 - T2)
         _, _, _, Q_s2a = self.model_target(batch_end_state, batch_end_action, action_type=self.action_type, gnn_step=gnn_step)
+        if verbose:
+            T4 = time.time(); print('forward target:', T4 - T3)
 
         chosen_actions = self.sample_actions_from_q(Q_s2a, action_num, batch_size, Temperature=self.eps)
-        q = self.gamma ** q_step * Q_s2a[chosen_actions] - Q_s1a_
+
+        if False and rollout_step:
+            q = torch.max(self.gamma ** q_step * Q_s2a[chosen_actions], rollout_episode_R) - Q_s1a_
+        else:
+            q = self.gamma ** q_step * Q_s2a[chosen_actions] - Q_s1a_
+
+        if verbose:
+            T5 = time.time(); print('choose action from q:', T5 - T4)
 
         if self.priority_sampling:
             # print(self.cascade_replay_buffer_weight.view(-1)[selected_indices])
@@ -399,7 +503,7 @@ class DQN:
             self.Q_err = 0
             self.log.add_item('entropy', 0)
 
-    def train_dqn(self, epoch=0, batch_size=16, num_episodes=10, episode_len=50, gnn_step=10, q_step=1, ddqn=False):
+    def train_dqn(self, target_bg=None, epoch=0, batch_size=16, num_episodes=10, episode_len=50, gnn_step=10, q_step=1, rollout_step=0, ddqn=False):
         """
         :param batch_size:
         :param num_episodes:
@@ -424,18 +528,18 @@ class DQN:
         else:
             T3 = time.time()
             if epoch == 0:
-                self.run_batch_episode(action_type=self.action_type, gnn_step=gnn_step, episode_len=self.buf_epi_len,
-                                   batch_size=self.new_epi_batch_size)
+                self.run_batch_episode(target_bg=target_bg, action_type=self.action_type, gnn_step=gnn_step, episode_len=self.buf_epi_len,
+                                   batch_size=self.new_epi_batch_size, rollout_step=rollout_step)
                 # change step batch mask helper
                 self.problem.sample_episode = self.buf_epi_len * self.new_epi_batch_size
                 self.problem.gen_step_batch_mask()
             else:
-                self.run_cascade_episode(action_type=self.action_type, gnn_step=gnn_step)
+                self.run_cascade_episode(target_bg=target_bg, action_type=self.action_type, gnn_step=gnn_step, q_step=q_step, rollout_step=rollout_step)
             T4 = time.time()
             # trim experience replay buffer
             self.trim_replay_buffer(epoch)
 
-            R, Q = self.sample_from_cascade_buffer(batch_size=batch_size, q_step=q_step, gnn_step=gnn_step)
+            R, Q = self.sample_from_cascade_buffer(batch_size=batch_size, q_step=q_step, rollout_step=rollout_step, gnn_step=gnn_step)
 
             T6 = time.time()
         # 0.5s
@@ -444,7 +548,11 @@ class DQN:
         del R, Q
         torch.cuda.empty_cache()
 
-        print(T4-T3, T6-T4, T7-T6)
+        self._updata_lr(step=epoch, max_lr=2e-3, min_lr=1e-3, decay_step=10000)
+
+        print('Rollout time:', T4-T3)
+        print('Sample and forward time', T6-T4)
+        print('Backloss time', T7-T6)
 
         return self.log
 

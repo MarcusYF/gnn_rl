@@ -6,8 +6,8 @@ from tqdm import tqdm
 from toy_models.Qiter import state2QtableKey
 from k_cut import *
 
-k = 10
-m = 10
+k = 5
+m = 6
 n = k * m
 ajr = 8
 h = 32
@@ -21,14 +21,15 @@ episode_len = 10
 explore_prob = 0.0
 Temperature = 0.0000005
 
-def sdp_kcut(k, m, x, dist_mat=None, print_info=True):
+def sdp_kcut(k, m, x=None, dist_mat=None, print_info=True):
 
     n = k * m
 
-    C = np.random.randn(n, n)
-    for i in range(n):
-        for j in range(n):
-            C[i, j] = np.sqrt((x[i][0] - x[j][0])**2 + (x[i][1] - x[j][1])**2)
+    if x is not None:
+        C = np.random.randn(n, n)
+        for i in range(n):
+            for j in range(n):
+                C[i, j] = np.sqrt((x[i][0] - x[j][0])**2 + (x[i][1] - x[j][1])**2)
 
     if dist_mat is not None:
         C = dist_mat
@@ -109,14 +110,26 @@ def sdp_kcut(k, m, x, dist_mat=None, print_info=True):
 #     if state2QtableKey(result) == state2QtableKey(validation_problem0[i][1]):
 #         bingo += 1
 
-problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h, mode=mode, sample_episode=sample_episode)
-test_bg = problem.gen_batch_graph(batch_size=batch_size)
+style = 'er-0.5'
+# style = 'plain'
+
+problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h, mode=mode, sample_episode=sample_episode, graph_style=style)
+test_bg = problem.gen_batch_graph(batch_size=batch_size, style=style)
+test_bg = problem.graph_generator.generate_batch_G(batch_size=batch_size, style=style)
 init_S = problem.calc_batchS(bg=test_bg)
 print(sum(init_S))
 
+problem.gen_batch_graph(batch_size=1)
 sdp_label = []
 for i in tqdm(range(batch_size)):
-    result = sdp_kcut(k=k, m=m, x=test_bg.ndata['x'][n*i:n*(i+1),:], print_info=False)
+    if style.startswith('er') or style.startswith('ba'):
+        nonzero_idx = [i for i in range(n ** 2) if i % (n + 1) != 0]
+        C = np.zeros((n*n, 1))
+        C[nonzero_idx, :] = test_bg.edata['d'][n*(n-1)*i:n*(n-1)*(i+1),:].numpy()
+        C = C.reshape((n, n))
+        result = sdp_kcut(k=k, m=m, dist_mat=C, print_info=False)
+    else:
+        result = sdp_kcut(k=k, m=m, x=test_bg.ndata['x'][n*i:n*(i+1),:], print_info=False)
     sdp_label.extend(result)
 tmp_bg = dc(test_bg)
 problem.set_batch_label(tmp_bg, torch.tensor(sdp_label))

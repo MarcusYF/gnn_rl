@@ -1,4 +1,4 @@
-from k_cut import KCut_DGL
+from k_cut import *
 import matplotlib.pyplot as plt
 from copy import deepcopy as dc
 import torch as th
@@ -21,10 +21,15 @@ def state2QtableKey(s, reduce_rotate=True):
 def QtableKey2state(k):
     return [int(x) for x in k.split(',')]
 
-def vis_g(problem, name='test', topo='knn'):
+def vis_g(problem, k=None, name='test', topo='knn'):
     plt.figure()
-    k = problem.k
-    g = problem.g
+
+    if isinstance(problem, dgl.DGLGraph):
+        g = problem
+        k = k
+    else:
+        k = problem.k
+        g = problem.g
     X = g.ndata['x'].cpu()
     n = X.shape[0]
     label = g.ndata['label'].cpu()

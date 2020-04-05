@@ -12,25 +12,26 @@ from toy_models.Qiter import vis_g
 from DQN import to_cuda
 from toy_models.Qiter import vis_g, state2QtableKey, QtableKey2state
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 model_name = 'dqn_5by6_0217_weightS'
 model_name = 'dqn_3by3_0218_t9'
 model_name = 'dqn_3by3_0223_pauseA_w'
 
 model_name = 'dqn_3by3_0223_pauseA_clipQ'
-model_name = 'dqn_3by3_0223_base_in'
-model_name = 'dqn_3by3_0229_base1'
+model_name = 'dqn_3by3_0330_base'
+model_name = 'dqn_3by3_0329_qstep2'
 # model_name = 'dqn_3by3_0310_base2'
-model_name = 'dqn_5by6_0315_mha'
-model_version = str(50000)
-k = 5
-m = 6
-ajr = 29
+model_name = 'dqn_3by3_0329_cluster'
+# model_name = 'dqn_3by5_0330_cluster'
+model_version = str(20000)
+k = 3
+m = 3
+ajr = 8
 h = 32
 mode = 'complete'
 q_net = 'mlp'
-batch_size = 70
+batch_size = 100
 trial_num = 1
 sample_episode = batch_size * trial_num
 gnn_step = 3
@@ -45,7 +46,7 @@ with open(folder + 'dqn_' + model_version, 'rb') as model_file:
 #     aux = pickle.load(model_file)
 
 # test summary
-problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h, mode=mode, sample_episode=sample_episode)
+problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h, mode=mode, sample_episode=sample_episode, graph_style='cluster')
 test = test_summary(alg=alg, problem=problem, q_net=q_net, forbid_revisit=0)
 
 # with open('/p/reinforcement/data/gnn_rl/model/test_data/3by3/0', 'rb') as valid_file:
@@ -71,10 +72,14 @@ test = test_summary(alg=alg, problem=problem, q_net=q_net, forbid_revisit=0)
 #     bg_easy.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_easy.batch_size)
 #     bg_subopt.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_subopt.batch_size)
 #     bg_opt.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_opt.batch_size)
-
+#
 
 # random validation set
-bg = to_cuda(problem.gen_batch_graph(batch_size=batch_size, style='cluster'))
+why not generalise to larger graphs?
+problem = KCut_DGL(k=k, m=3, adjacent_reserve=8, hidden_dim=h, mode=mode, sample_episode=sample_episode, graph_style='cluster')
+test = test_summary(alg=alg, problem=problem, q_net=q_net, forbid_revisit=0)
+
+bg = to_cuda(problem.gen_batch_graph(batch_size=batch_size, style='plain'))
 test.run_test(problem=bg, trial_num=trial_num, batch_size=batch_size, gnn_step=gnn_step, episode_len=episode_len, explore_prob=explore_prob, Temperature=Temperature)
 test.show_result()
 

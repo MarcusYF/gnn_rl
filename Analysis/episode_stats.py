@@ -304,12 +304,12 @@ class test_summary:
             new_states, rewards = self.problem.step_batch(states=self.bg, action=actions)
             R = [reward.item() for reward in rewards]
 
-            enc_states = [state2QtableKey(self.bg.ndata['label'][k * self.n: (k + 1) * self.n].argmax(dim=1).cpu().numpy()) for k in range(batch_size)]
+            # enc_states = [state2QtableKey(self.bg.ndata['label'][k * self.n: (k + 1) * self.n].argmax(dim=1).cpu().numpy()) for k in range(batch_size)]
 
             [ep[k].write(action=actions[k, :], action_idx=best_actions[k] - self.action_mask[k], reward=R[k]
                      , q_val=Q_sa.view(-1, self.num_actions)[k, :]
                      , actions=batch_legal_actions.view(-1, self.num_actions, 2)[k, :, :]
-                     , state_enc=enc_states[k]
+                     , state_enc=None #  enc_states[k]
                      # , sub_reward=sub_rewards[:, k].cpu().numpy()
                      ,sub_reward=None
                      , loop_start_position=loop_start_position[k]) for k in range(batch_size)]

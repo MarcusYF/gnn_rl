@@ -4,13 +4,14 @@ from tqdm import tqdm
 from toy_models.Qiter import state2QtableKey
 from k_cut import *
 
-k = 10
-m = 10
+k = 3
+m = 5
 n = k * m
-ajr = 8
+ajr = 14
 h = 32
 mode = 'complete'
 q_net = 'mlp'
+style = 'cluster'
 batch_size = 100
 trial_num = 1
 sample_episode = batch_size * trial_num
@@ -70,8 +71,12 @@ def mca_irrev_kcut(k, m, x, dist_mat=None, print_info=True):
 #     if state2QtableKey(result) == state2QtableKey(validation_problem0[i][1]):
 #         bingo += 1
 
-problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h, mode=mode, sample_episode=sample_episode)
+problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h
+                   , mode=mode
+                   , sample_episode=sample_episode
+                   , graph_style=style)
 test_bg = problem.gen_batch_graph(batch_size=batch_size)
+print('avg dist:', test_bg.edata['d'].sum()/test_bg.edata['d'].shape[0])
 init_S = problem.calc_batchS(bg=test_bg)
 print(sum(init_S))
 
