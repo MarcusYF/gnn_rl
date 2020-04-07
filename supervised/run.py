@@ -20,7 +20,7 @@ parser.add_argument('--save_folder', default='test')
 parser.add_argument('--gpu', default='0', help="")
 parser.add_argument('--action_type', default='swap', help="")
 parser.add_argument('--k', default=3, help="size of K-cut")
-parser.add_argument('--m', default=3, help="cluster size")
+parser.add_argument('--m', default='3', help="cluster size")
 parser.add_argument('--ajr', default=5, help="")
 parser.add_argument('--h', default=16, help="hidden dimension")
 parser.add_argument('--extend_h', default=True)
@@ -44,7 +44,12 @@ save_folder = args['save_folder']
 gpu = args['gpu']
 action_type = args['action_type']
 k = int(args['k'])
-m = int(args['m'])
+m = [int(i) for i in args['m'].split(',')]
+if len(m) == 1:
+    m = m[0]
+    N = k * m
+else:
+    N = sum(m)
 ajr = int(args['ajr'])
 h = int(args['h'])
 extend_h = bool(args['extend_h'])
@@ -70,7 +75,7 @@ parent_path = os.path.abspath(os.path.join(os.getcwd(), "../.."))
 # problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h)
 
 # Initialize model and optimizer
-model = DQNet(k=k, m=m, ajr=ajr, num_head=4, hidden_dim=h, extended_h=extend_h, use_x=use_x).cuda()
+model = DQNet(k=k, n=N, num_head=4, hidden_dim=h, extended_h=extend_h, use_x=use_x).cuda()
 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 if lr_half_time == 0:
     gamma = 1

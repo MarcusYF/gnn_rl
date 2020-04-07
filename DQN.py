@@ -5,6 +5,7 @@ Created on Sun Dec 30 16:20:39 2018
 """
 import time
 import numpy as np
+import torch
 from dgl.graph import DGLGraph
 from log_utils import mean_val, logger
 from k_cut import *
@@ -90,6 +91,7 @@ class EpisodeHistory:
 
 @dataclass
 class sars:
+    # TODO: save space for s1
     s0: DGLGraph
     a: tuple
     r: float
@@ -104,7 +106,6 @@ class DQN:
                  , sample_batch_episode=False
                  , replay_buffer_max_size=5000
                  , epi_len=50, new_epi_batch_size=10
-                 , extended_h=False, time_aware=False, use_x=False
                  , edge_info='adj_weight'
                  , readout='mlp'
                  , explore_method='epsilon_greedy'
@@ -115,17 +116,14 @@ class DQN:
         self.action_type = action_type
         self.G = problem.g  # the graph
         self.k = problem.k  # num of clusters
-        self.m = problem.m  # num of nodes in cluster
         self.ajr = problem.adjacent_reserve  # degree of node in graph
         self.hidden_dim = problem.hidden_dim  # hidden dimension for node representation
-        self.n = self.k * self.m  # num of nodes
+        self.n = problem.N  # num of nodes
         self.eps = eps  # constant for exploration in dqn
-        self.extended_h = extended_h
-        self.use_x = use_x
         self.edge_info = edge_info
         self.explore_method = explore_method
         self.clip_target = clip_target
-        self.model = DQNet(k=self.k, m=self.m, ajr=self.ajr, num_head=2, hidden_dim=self.hidden_dim, extended_h=self.extended_h, use_x=self.use_x, edge_info=self.edge_info, readout=readout).cuda()
+        self.model = DQNet(k=self.k, n=self.n, num_head=2, hidden_dim=self.hidden_dim, edge_info=self.edge_info, readout=readout).cuda()
         self.model_target = dc(self.model)
         self.gamma = gamma  # reward decay const
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
@@ -141,7 +139,6 @@ class DQN:
         self.buffer_actual_size = sum(self.stage_max_sizes)
         self.priority_sampling = priority_sampling
         self.cascade_buffer_kcut_value = torch.zeros((self.buf_epi_len, self.new_epi_batch_size))
-        self.time_aware = time_aware
         self.action_dropout = action_dropout
         self.log = logger()
         self.Q_err = 0  # Q error
@@ -162,7 +159,6 @@ class DQN:
             bg = to_cuda(self.problem.gen_batch_graph(batch_size=batch_size))
         else:
             bg = to_cuda(self.problem.gen_target_batch_graph(target_bg=target_bg, batch_size=batch_size))
-        t = 0
 
         num_actions = self.problem.get_legal_actions(action_type=action_type, action_dropout=self.action_dropout).shape[0]
         action_mask = torch.tensor(range(0, num_actions * batch_size, num_actions)).cuda()
@@ -172,6 +168,7 @@ class DQN:
         explore_step_offset = torch.cat([torch.zeros([1], dtype=torch.long), torch.cumsum(explore_dice.sum(dim=1), dim=0)], dim=0)
         explore_replace_actions = torch.randint(high=num_actions, size=(explore_replace_mask.shape[0], )).cuda()
 
+        t = 0
         while t < episode_len:
 
             batch_legal_actions = self.problem.get_legal_actions(state=bg, action_type=action_type, action_dropout=self.action_dropout).cuda()
@@ -179,7 +176,7 @@ class DQN:
             # epsilon greedy strategy
             # TODO: cannot dc bg once being forwarded.
             # TODO: multi - gpu parallelization
-            _, _, _, Q_sa = self.model(dc(bg), batch_legal_actions, action_type=action_type, gnn_step=gnn_step, time_aware=self.time_aware, remain_episode_len=episode_len-t-1)
+            _, _, _, Q_sa = self.model(dc(bg), batch_legal_actions, action_type=action_type, gnn_step=gnn_step)
 
             best_actions = Q_sa.view(-1, num_actions).argmax(dim=1)
 
@@ -192,7 +189,7 @@ class DQN:
 
             # update bg inplace and calculate batch rewards
             g0 = [g for g in dgl.unbatch(dc(bg))]  # current_state
-            _, rewards = self.problem.step_batch(states=bg, action=actions)
+            _, rewards = self.problem.step_batch(states=bg, action=actions, action_type=action_type)
             g1 = [g for g in dgl.unbatch(dc(bg))]  # after_state
 
             if self.sample_batch_episode:
@@ -204,8 +201,7 @@ class DQN:
                 if self.priority_sampling:
                     # compute prioritized weights
                     batch_legal_actions = self.problem.get_legal_actions(state=bg, action_type=action_type, action_dropout=self.action_dropout).cuda()
-                    _, _, _, Q_sa_next = self.model(dc(bg), batch_legal_actions, action_type=action_type, gnn_step=gnn_step,
-                                                    time_aware=self.time_aware, remain_episode_len=episode_len - t - 1)
+                    _, _, _, Q_sa_next = self.model(dc(bg), batch_legal_actions, action_type=action_type, gnn_step=gnn_step)
                     delta = Q_sa[best_actions] - (rewards + self.gamma * Q_sa_next.view(-1, num_actions).max(dim=1).values)
                     # delta = (Q_sa[best_actions] - (rewards + self.gamma * Q_sa_next.view(-1, num_actions).max(dim=1).values)) / (torch.clamp(torch.abs(Q_sa[best_actions]),0.1))
                     self.cascade_replay_buffer_weight[t, :batch_size] = torch.abs(delta.detach())
@@ -237,30 +233,6 @@ class DQN:
         best_actions += torch.tensor(range(0, num_actions * batch_size, num_actions)).repeat(top_k).cuda()
         return best_actions
 
-    def prune_actions(self, bg, recent_states):
-        batch_size = bg.batch_size
-        n = bg.ndata['label'].shape[0] // batch_size
-
-        batch_legal_actions = self.problem.get_legal_actions(state=bg, action_type=self.action_type,
-                                                             action_dropout=self.action_dropout).cuda()
-        num_actions = batch_legal_actions.shape[0] // batch_size
-        forbid_action_mask = torch.zeros(batch_legal_actions.shape[0], 1).cuda()
-
-        for k in range(self.new_epi_batch_size, bg.batch_size):
-            cur_state = state2QtableKey(bg.ndata['label'][k*n:(k+1)*n, :].argmax(dim=1).cpu().numpy())  # current state
-            forbid_states = set(recent_states[k-self.new_epi_batch_size])
-            candicate_actions = batch_legal_actions[k * num_actions:(k + 1) * num_actions, :]
-            for j in range(num_actions):
-                cur_state_l = QtableKey2state(cur_state)
-                cur_state_l[candicate_actions[j][0]] ^= cur_state_l[candicate_actions[j][1]]
-                cur_state_l[candicate_actions[j][1]] ^= cur_state_l[candicate_actions[j][0]]
-                cur_state_l[candicate_actions[j][0]] ^= cur_state_l[candicate_actions[j][1]]
-                if state2QtableKey(cur_state_l) in forbid_states:
-                    forbid_action_mask[j + k * num_actions] += 1
-        batch_legal_actions = batch_legal_actions * (1 - forbid_action_mask.int()).t().flatten().unsqueeze(1)
-
-        return batch_legal_actions
-
     def rollout(self, bg, num_actions, rollout_step, top_num=5):
 
         batch_size = self.new_epi_batch_size * self.buf_epi_len * top_num
@@ -269,13 +241,13 @@ class DQN:
             batch_legal_actions = self.problem.get_legal_actions(state=bg, action_type=self.action_type,
                                                                  action_dropout=self.action_dropout).cuda()
 
-            _, _, _, Q_sa = self.model(bg, batch_legal_actions)
+            _, _, _, Q_sa = self.model(bg, batch_legal_actions, action_type=self.action_type)
 
             chosen_actions = self.sample_actions_from_q(Q_sa, num_actions, batch_size, eps=0.0, top_k=1)
             _actions = batch_legal_actions[chosen_actions]
 
             # update bg inplace and calculate batch rewards
-            _, _rewards = self.problem.step_batch(states=bg, action=_actions)
+            _, _rewards = self.problem.step_batch(states=bg, action_type=self.action_type, action=_actions)
 
             rollout_rewards[:, step] = _rewards
             # print('step', step, rewards)
@@ -307,6 +279,8 @@ class DQN:
 
         batch_size = self.new_epi_batch_size * self.buf_epi_len
         num_actions = self.problem.get_legal_actions(action_type=action_type, action_dropout=self.action_dropout).shape[0]
+        if isinstance(self.problem.g, BatchedDGLGraph):
+            num_actions //= self.problem.g.batch_size
         if verbose:
             T4 = time.time(); print('t4', T4 - T3)
         # recent_states = list(itertools.chain(
@@ -332,7 +306,6 @@ class DQN:
             actions = batch_legal_actions[chosen_actions]
             rollout_rewards = torch.zeros(batch_size, 1)
         else:
-            print('xxxxxxxxxxxxx')
             top_num = 10  # rollout for how many top actions
             rollout_bg = dgl.batch([bg] * top_num)
 
@@ -341,7 +314,7 @@ class DQN:
 
             topk_actions = batch_legal_actions[chosen_actions]
 
-            bg1, rewards1 = self.problem.step_batch(states=rollout_bg, action=topk_actions)
+            bg1, rewards1 = self.problem.step_batch(states=rollout_bg, action_type=action_type, action=topk_actions)
 
             rollout_rewards = self.rollout(bg=bg1, num_actions=num_actions, rollout_step=rollout_step, top_num=top_num)
 
@@ -358,7 +331,7 @@ class DQN:
             rollout_rewards = rollout_rewards[rollout_selected_actions, :]
 
         # update bg inplace and calculate batch rewards
-        _, rewards = self.problem.step_batch(states=bg, action=actions)
+        _, rewards = self.problem.step_batch(states=bg, action_type=action_type, action=actions)
 
         g0 = new_graphs  # current_state
         g1 = [g for g in dgl.unbatch(bg)]  # after_state

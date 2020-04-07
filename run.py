@@ -43,35 +43,32 @@ def latestModelVersion(file):
 # python run.py --gpu=1 --style=er-0.5 --save_folder=dqn_5by6_0324_er0.5_2
 # python run.py --gpu=2 --style=ba-3 --save_folder=dqn_5by6_0324_ba3_2
 parser = argparse.ArgumentParser(description="GNN with RL")
-parser.add_argument('--save_folder', default='dqn_3by3_0402_rollout_top10step5')
+parser.add_argument('--save_folder', default='dqn_4by4_0407_base_scalegnn')
 parser.add_argument('--train_distr', default='plain', help="")
 parser.add_argument('--test_distr0', default='plain', help="")
 parser.add_argument('--target_mode', default=False)
 parser.add_argument('--test_distr1', default='plain', help="")
 parser.add_argument('--test_distr2', default='plain', help="")
 parser.add_argument('--k', default=3, help="size of K-cut")
-parser.add_argument('--m', default=3, help="cluster size")
+parser.add_argument('--m', default='3', help="cluster size")
 parser.add_argument('--ajr', default=8, help="")
 parser.add_argument('--h', default=32, help="hidden dimension")
-parser.add_argument('--rollout_step', default=10)
+parser.add_argument('--rollout_step', default=0)
 parser.add_argument('--q_step', default=1)
 parser.add_argument('--batch_size', default=500, help='')
 parser.add_argument('--n_episode', default=1, help='')
 parser.add_argument('--episode_len', default=50, help='')
+parser.add_argument('--action_type', default='swap', help="")
+parser.add_argument('--gnn_step', default=3, help='')
 
 parser.add_argument('--gpu', default='0', help="")
 parser.add_argument('--resume', default=False)
 parser.add_argument('--problem_mode', default='complete', help="")
 parser.add_argument('--readout', default='mlp', help="")
-parser.add_argument('--action_type', default='swap', help="")
-parser.add_argument('--extend_h', default=True)
-parser.add_argument('--use_x', default=0)
 parser.add_argument('--edge_info', default='adj_dist')
 parser.add_argument('--clip_target', default=0)
 parser.add_argument('--explore_method', default='epsilon_greedy')
 parser.add_argument('--priority_sampling', default=0)
-parser.add_argument('--time_aware', default=False)
-parser.add_argument('--a', default=1, help="")
 parser.add_argument('--gamma', type=float, default=0.90, help="")
 parser.add_argument('--eps0', type=float, default=0.8, help="")
 parser.add_argument('--eps', type=float, default=0.1, help="")
@@ -85,7 +82,6 @@ parser.add_argument('--replay_buffer_size', default=5000, help="")
 parser.add_argument('--test_batch_size', default=100, help='')
 parser.add_argument('--grad_accum', default=1, help='')
 parser.add_argument('--sample_batch_episode', type=int, default=0, help='')  # 0 for cascade sampling and 1 for batch episode sampling
-parser.add_argument('--gnn_step', default=3, help='')
 parser.add_argument('--ddqn', default=False)
 
 args = vars(parser.parse_args())
@@ -97,7 +93,12 @@ problem_mode = args['problem_mode']
 readout = args['readout']
 action_type = args['action_type']
 k = int(args['k'])
-m = int(args['m'])
+m = [int(i) for i in args['m'].split(',')]
+if len(m) == 1:
+    m = m[0]
+    N = k * m
+else:
+    N = sum(m)
 if k == 3 and m == 3:
     run_validation_33 = True
 else:
@@ -108,14 +109,10 @@ test_graph_style_0 = args['test_distr0']
 test_graph_style_1 = args['test_distr1']
 test_graph_style_2 = args['test_distr2']
 h = int(args['h'])
-extend_h = bool(args['extend_h'])
-use_x = bool(int(args['use_x']))
 edge_info = args['edge_info']
 clip_target = bool(int(args['clip_target']))
 explore_method = args['explore_method']
 priority_sampling = bool(int(args['priority_sampling']))
-time_aware = bool(args['time_aware'])
-a = int(args['a'])
 gamma = float(args['gamma'])
 lr = args['lr']    # learning rate
 action_dropout = args['action_dropout']    # learning rate
@@ -160,9 +157,6 @@ alg = DQN(problem, action_type=action_type
               , replay_buffer_max_size=replay_buffer_size
               , epi_len=episode_len
               , new_epi_batch_size=n_episode
-              , extended_h=extend_h
-              , time_aware=time_aware
-              , use_x=use_x
               , edge_info=edge_info
               , readout=readout
               , explore_method=explore_method
@@ -210,9 +204,9 @@ if run_validation_33:
     bg_subopt = dgl.batch(bg_subopt)
 
     if ajr == 8:
-        bg_hard.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_hard.batch_size)
-        bg_easy.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_easy.batch_size)
-        bg_subopt.edata['e_type'][:, 0] = torch.ones(k * m * ajr * bg_subopt.batch_size)
+        bg_hard.edata['e_type'][:, 0] = torch.ones(N * ajr * bg_hard.batch_size)
+        bg_easy.edata['e_type'][:, 0] = torch.ones(N * ajr * bg_easy.batch_size)
+        bg_subopt.edata['e_type'][:, 0] = torch.ones(N * ajr * bg_subopt.batch_size)
 else:
     bg_easy = to_cuda(test_problem0.gen_batch_graph(batch_size=test_episode, style=test_graph_style_0))
     bg_hard = to_cuda(test_problem1.gen_batch_graph(batch_size=test_episode, style=test_graph_style_1))
@@ -277,7 +271,7 @@ def run_dqn(alg):
 
         # test summary
         if n_iter % 100 == 0:
-            test = test_summary(alg=alg, problem=test_problem1, q_net=readout, forbid_revisit=0)
+            test = test_summary(alg=alg, problem=test_problem1, action_type=action_type, q_net=readout, forbid_revisit=0)
 
             test.run_test(problem=to_cuda(bg_hard), trial_num=1, batch_size=100, gnn_step=gnn_step,
                           episode_len=episode_len, explore_prob=0.0, Temperature=1e-8)

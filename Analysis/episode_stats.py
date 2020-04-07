@@ -12,7 +12,7 @@ import dgl
 
 class test_summary:
 
-    def __init__(self, alg, problem=None, q_net='mlp', forbid_revisit=False):
+    def __init__(self, alg, problem=None, action_type='swap', q_net='mlp', forbid_revisit=False):
         if isinstance(alg, DQN):
             self.alg = alg.model
         else:
@@ -23,6 +23,7 @@ class test_summary:
             self.n = problem.g.ndata['label'].shape[0] // problem.g.batch_size
         else:
             self.n = problem.g.ndata['label'].shape[0]
+        self.action_type = action_type
         # if isinstance(problem, BatchedDGLGraph):
         #     self.problem = problem
         # elif isinstance(problem, list):
@@ -90,7 +91,7 @@ class test_summary:
             # print('posi reward avg:', sum(posi) / len(posi))
             # print('nega reward avg:', sum(nega) / len(nega))
             max_idx = torch.tensor(M).argmax().item()
-            _, r = pb.step((actions[max_idx, 0].item(), actions[max_idx, 1].item()))
+            _, r = pb.step((actions[max_idx, 0].item(), actions[max_idx, 1].item()), action_type=self.action_type)
             R.append((actions[max_idx, 0].item(), actions[max_idx, 1].item(), r.item()))
             Reward.append(r.item())
             res.append(res[-1] - r.item())
@@ -113,9 +114,9 @@ class test_summary:
             vis_g(self.problem, name=path + str(0), topo='cut')
 
         for i in range(t):
-            actions = self.problem.get_legal_actions(state=self.problem.g)
-            S_a_encoding, h1, h2, Q_sa = alg.forward(to_cuda(self.problem.g), actions.cuda(), gnn_step=3)
-            _, r = self.problem.step(state=self.problem.g, action=actions[torch.argmax(Q_sa)])
+            actions = self.problem.get_legal_actions(state=self.problem.g, action_type=self.action_type)
+            S_a_encoding, h1, h2, Q_sa = alg.forward(to_cuda(self.problem.g), actions.cuda(), action_type=self.action_type, gnn_step=3)
+            _, r = self.problem.step(state=self.problem.g, action=actions[torch.argmax(Q_sa)], action_type=self.action_type)
 
             print(Q_sa.detach().cpu().numpy())
             print('action index:', torch.argmax(Q_sa).detach().cpu().item())
@@ -128,10 +129,10 @@ class test_summary:
 
     def get_state_eval_from_aux(self, bg, alg, aux):
         dummy_actions = torch.zeros(bg.batch_size, 2).int().cuda()
-        S_enc, _, _, _ = alg.forward(bg, dummy_actions, gnn_step=3, aux_output=True)
+        S_enc, _, _, _ = alg.forward(bg, dummy_actions, gnn_step=3, action_type=self.action_type, aux_output=True)
 
-        actions = self.problem.get_legal_actions(state=bg)
-        _, _, _, q = alg.forward(bg, actions, gnn_step=3)
+        actions = self.problem.get_legal_actions(state=bg, action_type=self.action_type)
+        _, _, _, q = alg.forward(bg, actions, action_type=self.action_type, gnn_step=3)
 
         # select top-k largest q-values
         q_topk = q.view(bg.batch_size, -1).sort(dim=1).values[:, -5:]  # (b, 5)
@@ -173,9 +174,9 @@ class test_summary:
 
             for i in range(t):
 
-                actions = self.problem.get_legal_actions(state=self.problem.g)
-                S_a_encoding, h1, h2, Q_sa = alg.forward(to_cuda(self.problem.g), actions.cuda(), gnn_step=3)
-                _, r = self.problem.step(state=self.problem.g, action=actions[torch.argmax(Q_sa)])
+                actions = self.problem.get_legal_actions(state=self.problem.g, action_type=self.action_type)
+                S_a_encoding, h1, h2, Q_sa = alg.forward(to_cuda(self.problem.g), actions.cuda(), action_type=self.action_type, gnn_step=3)
+                _, r = self.problem.step(state=self.problem.g, action=actions[torch.argmax(Q_sa)], action_type=self.action_type)
                 S -= r.item()
 
                 # print(Q_sa.detach().cpu().numpy())
@@ -198,7 +199,13 @@ class test_summary:
 
     def run_test(self, problem=None, init_trial=10, trial_num=1, batch_size=100, gnn_step=3, episode_len=50, explore_prob=0.1, Temperature=1.0, aux_model=None, beta=0):
         self.episode_len = episode_len
-        self.num_actions = self.problem.N * (self.problem.N - self.problem.m) // 2 + 1
+        self.num_actions = self.problem.get_legal_actions(action_type=self.action_type).shape[0]
+        if isinstance(self.problem.g, BatchedDGLGraph):
+            self.num_actions //= self.problem.g.batch_size
+        # if self.action_type == 'swap':
+        #     self.num_actions = self.problem.N * (self.problem.N - self.problem.m) // 2 + 1
+        # else:
+        #     self.num_actions = self.problem.N * (self.problem.k - 1) + 1
         self.trial_num = trial_num
         self.batch_size = batch_size
         if problem is None:
@@ -236,7 +243,7 @@ class test_summary:
         loop_remain_index = set(range(self.batch_size))
         self.valid_states = [[ep[i].init_state] for i in range(self.batch_size)]
         for i in tqdm(range(episode_len)):
-            batch_legal_actions = test_problem.get_legal_actions(state=self.bg, action_type='swap').cuda()
+            batch_legal_actions = test_problem.get_legal_actions(state=self.bg, action_type=self.action_type).cuda()
 
             # if self.forbid_revisit and i > 0:
             #
@@ -262,9 +269,24 @@ class test_summary:
             batch_legal_actions = batch_legal_actions * (1 - forbid_action_mask.int()).t().flatten().unsqueeze(1)
 
             if self.q_net == 'mlp':
-                S_a_encoding, h1, h2, Q_sa = self.alg.forward(self.bg, batch_legal_actions, gnn_step=gnn_step)
+                # bg1 = to_cuda(self.bg)
+                # bg1.ndata['label'] = bg1.ndata['label'][:,[0,2,1]]
+                # bg2 = to_cuda(self.bg)
+                # bg2.ndata['label'] = bg2.ndata['label'][:,[1,0,2]]
+                # bg3 = to_cuda(self.bg)
+                # bg3.ndata['label'] = bg3.ndata['label'][:,[1,2,0]]
+                # bg4 = to_cuda(self.bg)
+                # bg4.ndata['label'] = bg4.ndata['label'][:,[2,0,1]]
+                # bg5 = to_cuda(self.bg)
+                # bg5.ndata['label'] = bg5.ndata['label'][:,[2,1,0]]
+
+                # S_a_encoding, h1, h2, Q_sa = self.alg.forward(dgl.batch([self.bg, bg1, bg2, bg3, bg4, bg5]), torch.cat([batch_legal_actions]*6),
+                #                                               action_type=self.action_type, gnn_step=gnn_step)
+
+                S_a_encoding, h1, h2, Q_sa = self.alg.forward(self.bg, batch_legal_actions, action_type=self.action_type, gnn_step=gnn_step)
+                # Q_sa = Q_sa.view(6, -1, self.num_actions).sum(dim=0)
             else:
-                S_a_encoding, h1, h2, Q_sa = self.alg.forward_MHA(self.bg, batch_legal_actions, gnn_step=gnn_step)
+                S_a_encoding, h1, h2, Q_sa = self.alg.forward_MHA(self.bg, batch_legal_actions, action_type=self.action_type, gnn_step=gnn_step)
 
             if beta > 0:
                 self.problem.sample_episode *= self.num_actions
@@ -274,8 +296,9 @@ class test_summary:
 
                 new_bg, _ = self.problem.step_batch(states=dgl.batch([self.bg] * self.num_actions),
                                                     action=batch_legal_actions.view(batch_size, self.num_actions,
-                                                                                    2).transpose(0, 1).reshape(-1, 2),
-                                                    return_sub_reward=False)
+                                                                                    2).transpose(0, 1).reshape(-1, 2)
+                                                    , action_type=self.action_type
+                                                    , return_sub_reward=False)
                 self.problem.sample_episode = self.problem.sample_episode // self.num_actions
                 self.problem.gen_step_batch_mask()
 
@@ -301,7 +324,7 @@ class test_summary:
 
             actions = batch_legal_actions[chose_actions]
 
-            new_states, rewards = self.problem.step_batch(states=self.bg, action=actions)
+            new_states, rewards = self.problem.step_batch(states=self.bg, action=actions, action_type=self.action_type)
             R = [reward.item() for reward in rewards]
 
             # enc_states = [state2QtableKey(self.bg.ndata['label'][k * self.n: (k + 1) * self.n].argmax(dim=1).cpu().numpy()) for k in range(batch_size)]

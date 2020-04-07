@@ -22,9 +22,9 @@ model_name = 'dqn_3by3_0223_pauseA_clipQ'
 model_name = 'dqn_3by3_0330_base'
 model_name = 'dqn_3by3_0329_qstep2'
 # model_name = 'dqn_3by3_0310_base2'
-model_name = 'dqn_3by3_0329_cluster'
+model_name = 'dqn_3by3_0405_base'
 # model_name = 'dqn_3by5_0330_cluster'
-model_version = str(20000)
+model_version = str(30000)
 k = 3
 m = 3
 ajr = 8
@@ -75,7 +75,7 @@ test = test_summary(alg=alg, problem=problem, q_net=q_net, forbid_revisit=0)
 #
 
 # random validation set
-why not generalise to larger graphs?
+# why not generalise to larger graphs?
 problem = KCut_DGL(k=k, m=3, adjacent_reserve=8, hidden_dim=h, mode=mode, sample_episode=sample_episode, graph_style='cluster')
 test = test_summary(alg=alg, problem=problem, q_net=q_net, forbid_revisit=0)
 
