@@ -19,6 +19,8 @@ def to_cuda(G_, copy=True):
         G = dc(G_)
     else:
         G = G_
+    if 'adj' in G.ndata.keys():
+        G.ndata['adj'] = G.ndata['adj'].cuda()
     G.ndata['label'] = G.ndata['label'].cuda()
     G.edata['d'] = G.edata['d'].cuda()
     G.edata['e_type'] = G.edata['e_type'].cuda()
@@ -387,7 +389,7 @@ class DQN:
 
         return torch.cat(R), Q
 
-    def sample_from_cascade_buffer(self, batch_size, q_step, gnn_step, rollout_step=0, verbose=False):
+    def sample_from_cascade_buffer(self, batch_size, q_step, gnn_step, rollout_step=0, verbose=True):
 
         batch_size = min(batch_size, len(self.cascade_replay_buffer[0]) * self.buf_epi_len)
 
@@ -418,7 +420,15 @@ class DQN:
 
         # make batches
         batch_begin_state = dgl.batch([tpl.s0 for tpl in sample_buffer])
+        T11 = time.time();
+        print('mk batch:', T11 - T1)
         batch_end_state = dgl.batch([tpl.s1 for tpl in sample_buffer])
+        T111 = time.time();
+        print('mk batch:', T111 - T11)
+
+        # _, rewards = self.problem.step_batch(states=bg, action=actions, action_type=action_type)
+        # g1 = [g for g in dgl.unbatch(dc(bg))]  # after_state
+
         R = [tpl.r.unsqueeze(0) for tpl in sample_buffer]
 
         if rollout_step:

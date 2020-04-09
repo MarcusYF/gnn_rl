@@ -76,7 +76,8 @@ class GraphGenerator:
         _, neighbor_idx, dist_matrix = dgl.transform.knn_graph(g.ndata['x'], self.ajr + 1, extend_info=True)
 
         g.add_edges(self.src, self.dst)
-        g.edata['d'] = torch.sqrt(dist_matrix[0].view(-1, 1)[self.nonzero_idx, :])
+        g.ndata['adj'] = torch.sqrt(dist_matrix[0])
+        g.edata['d'] = g.ndata['adj'].view(-1, 1)[self.nonzero_idx, :]
 
         adjacent_matrix = torch.zeros((n * n, 1))
         adjacent_matrix[neighbor_idx[0] + self.adj_mask] = 1
@@ -157,17 +158,20 @@ class GraphGenerator:
         # calculate edges
         if target_bg is not None:
             # permute the dist matrix
+            # TODO: add ndata['adj']
             bg.edata['d'] *= F.relu(torch.ones(bg.edata['d'].shape).cuda() + 0.1 * torch.randn(bg.edata['d'].shape).cuda())
         else:
             if style.startswith('er') or style.startswith('ba'):
+                # TODO: add ndata['adj']
                 bg.edata['d'] = adj_matrices.view(batch_size, -1, 1)[:, self.nonzero_idx, :].view(-1, 1)
             else:
                 _, neighbor_idx, square_dist_matrix = dgl.transform.knn_graph(bg.ndata['x'].view(batch_size, n, -1), ajr + 1, extend_info=True)
                 square_dist_matrix = F.relu(square_dist_matrix, inplace=True)  # numerical error could result in NaN in sqrt. value
-                bg.edata['d'] = torch.sqrt(square_dist_matrix.view(batch_size, -1, 1)[:, self.nonzero_idx, :]).view(-1, 1)
+                bg.ndata['adj'] = torch.sqrt(square_dist_matrix).view(bg.number_of_nodes(), -1)
                 # scale d (maintain avg=0.5):
                 if style != 'plain':
-                    bg.edata['d'] /= (bg.edata['d'].sum() / bg.edata['d'].shape[0] / 0.5)
+                    bg.ndata['adj'] /= (bg.ndata['adj'].sum() / (bg.ndata['adj'].shape[0]**2) / 0.5)
+                bg.edata['d'] = bg.ndata['adj'].view(batch_size, -1, 1)[:, self.nonzero_idx, :].view(-1, 1)
 
         group_matrix = torch.bmm(bg.ndata['label'].view(batch_size, n, -1), bg.ndata['label'].view(batch_size, n, -1).transpose(1, 2)).view(batch_size, -1)[:, self.nonzero_idx].view(-1, 1)
 
@@ -187,6 +191,46 @@ class GraphGenerator:
 
         return bg
 
+# G=GraphGenerator(3,3,8, style='plain')
+# g=G.generate_batch_G(batch_size=2)
+
+def peek_greedy_reward(states, actions=None, action_type='swap'):
+    # g = problem.g
+    # states = dgl.batch([g,g])
+    # actions = problem.get_legal_actions(state=states)
+    if isinstance(states, BatchedDGLGraph):
+        batch_size = states.batch_size
+    else:
+        batch_size = 1
+    n = states.ndata['label'].shape[0] // batch_size
+    bn = batch_size * n
+
+    if actions is None:
+        mask = torch.bmm(states.ndata['label'].view(batch_size, n, -1),
+                         states.ndata['label'].view(batch_size, n, -1).transpose(1, 2))
+        legal_actions = torch.triu(1 - mask).nonzero()[:, 1:3]  # tensor (270, 2)
+        legal_actions = legal_actions.reshape(batch_size, -1, 2)
+        actions = torch.cat([legal_actions, (legal_actions[:, 0] * 0).unsqueeze(1)], dim=1).view(-1, 2)
+        group_matrix = mask.view(bn, n)
+    else:
+        group_matrix = torch.bmm(states.ndata['label'].view(batch_size, n, -1),
+                                 states.ndata['label'].view(batch_size, n, -1).transpose(1, 2)).view(bn, n)
+    num_action = actions.shape[0] // batch_size
+
+    action_mask = torch.tensor(range(0, bn, n)).unsqueeze(1).expand(batch_size, 2).repeat(1, num_action).view(
+        num_action * batch_size, -1).cuda()
+    actions_ = actions + action_mask
+    #  (b, n, n)
+    #  (b * num_action, n)
+    rewards = (states.ndata['adj'][actions_[:, 0], :] * (
+                group_matrix[actions_[:, 0], :] - group_matrix[actions_[:, 1], :])).sum(dim=1) \
+              + (states.ndata['adj'][actions_[:, 1], :] * (
+                group_matrix[actions_[:, 1], :] - group_matrix[actions_[:, 0], :])).sum(dim=1) \
+              + 2 * states.ndata['adj'][actions_[:, 0], actions[:, 1]]
+
+    return rewards
+
+# peek_greedy_reward(states=dgl.batch([g,g,g]))
 
 class KCut_DGL:
 
@@ -548,8 +592,9 @@ class NodeApplyModule(nn.Module):
 
         n1_h = torch.bmm(n1_hd.transpose(1, 2), n1_d).squeeze(2)
         n2_h = torch.bmm(n2_hd.transpose(1, 2), n2_d).squeeze(2)
-        print('n1_d', n1_d.shape)
-        h = self.activation(self.l1(l) + (1 / self.n) * (self.l2(n1_h) + self.t3(torch.sum(self.activation(self.t4(n1_d), inplace=True), dim=1))), inplace=True)
+        # print('self.l2(n1_h)', self.l2(n1_h).shape)
+        # print('self.t3(torch.sum(self.activation(self.t4(n1_d), inplace=True), dim=1))', self.t3(torch.sum(self.activation(self.t4(n1_d), inplace=True), dim=1)).shape)
+        h = self.activation(self.l1(l) + (self.l2(n1_h) + self.t3(torch.sum(self.activation(self.t4(n1_d), inplace=True), dim=1))), inplace=True)
         h2 = self.activation(self.l2_(n2_h) + self.t3_(torch.sum(self.activation(self.t4_(n2_d), inplace=True), dim=1)), inplace=True)
         # h = self.activation(h1 + self.t5(h2), inplace=True)
             # max_dist_in_cluster = n2_d.max(dim=1).values  # [batch_size, 1]
@@ -693,7 +738,7 @@ class DQNet(nn.Module):
                            , dropout=0.0
                            , activate_linear=True)
         # baseline
-        self.t5 = nn.Linear(self.hidden_dim, 1)
+        self.t5 = nn.Linear(self.hidden_dim + 1, 1)
         self.t6 = nn.Linear(self.hidden_dim, self.hidden_dim)
         # self.t66 = nn.Linear(5, self.hidden_dim)
         # # for centroid graph representation
@@ -821,20 +866,26 @@ class DQNet(nn.Module):
         # h = torch.cat([torch.cat([all_dist, group_dist], dim=1), torch.zeros((bn, self.hidden_dim - 2)).cuda()], dim=1)
         # h2 = torch.cat([torch.cat([all_dist, group_dist], dim=1), torch.zeros((bn, self.hidden_dim - 2)).cuda()], dim=1)
         h = torch.zeros((bn, self.hidden_dim)).cuda()
+        # h[:, 0] += n
         h2 = torch.zeros((bn, self.hidden_dim)).cuda()
-
+        # h2[:, 0] += n
         for i in range(gnn_step):
             for conv in self.layers:
                 h, h2 = conv(g, h, h2)
 
         g.ndata['h'] = h
         g.ndata['h2'] = h2
-
-        # split_bg = g.ndata['h2'].unsqueeze(2).repeat(1, 1, self.k) * g.ndata['label'].view(bn, 1, self.k)  # (b*n, h, k)
-        # batch_centroids = split_bg.view(batch_size, n, -1, self.k).sum(dim=1).transpose(1, 2)#.reshape(batch_size*self.k, -1)  # (b, k, h)
-        # cluster_embedding = F.relu(self.c1(batch_centroids)).sum(dim=1)  # (b, h)
-
         h_new = h2
+
+        # split_bg = g.ndata['h'].unsqueeze(2).repeat(1, 1, self.k) * g.ndata['label'].view(bn, 1, self.k)  # (b*n, h, k)
+        # batch_centroids = split_bg.view(batch_size, n, -1, self.k).mean(dim=1).transpose(1, 2)#.reshape(batch_size*self.k, -1)  # (b, k, h)
+        # cluster_embedding = F.relu(self.c1(batch_centroids)).mean(dim=1)  # (b, h)
+
+        if isinstance(g, BatchedDGLGraph):
+            cluster_embedding = dgl.mean_nodes(g, 'h')
+        else:
+            cluster_embedding = torch.mean(g.ndata['h'], dim=0)
+
 
         # compute group centroid for batch graph g
         # batch_centroid = []
@@ -851,9 +902,9 @@ class DQNet(nn.Module):
             # key = torch.cat([key, key], dim=2)  # (b, k, 2h)
             # value = key  # (b, k, 2h)
             # graph_embedding_stem = self.t6(dgl.mean_nodes(g, 'h'))  # (b, h)
-            graph_embedding = self.t6(dgl.mean_nodes(g, 'h')).repeat(1, num_action).view(num_action * batch_size, -1)
+            graph_embedding = self.t6(cluster_embedding).repeat(1, num_action).view(num_action * batch_size, -1)
         else:
-            graph_embedding = self.t6(torch.mean(g.ndata['h'], dim=0)).repeat(num_action, 1)
+            graph_embedding = self.t6(cluster_embedding).repeat(num_action, 1)
 
         if isinstance(g, BatchedDGLGraph):
             action_mask = torch.tensor(range(0, bn, n))\
@@ -871,7 +922,7 @@ class DQNet(nn.Module):
             # q_actions = torch.cat([g.ndata['h'][actions_[:, 0], :], g.ndata['h'][actions_[:, 1], :]], axis=1)
             # g.ndata['h'] = self.t7_1(g.ndata['h'])  # (b*n_a, h)
             # q_actions_stem = self.t7_2(g.ndata['h'][actions_[:, 0], :] + g.ndata['h'][actions_[:, 1], :])  # (b*n_a, h)
-            q_actions = self.t7(torch.cat([(g.ndata['h'])[actions_[:, 0], :], (g.ndata['h'])[actions_[:, 1], :]], axis=1))
+            q_actions = self.t7(torch.cat([g.ndata['h'][actions_[:, 0], :], g.ndata['h'][actions_[:, 1], :]], axis=1))
 
         # assign 0 embedding for dummy actions: when num_action > 1, set the dummy actions at the end of the sequence by default
         if num_action > 1 and action_type=='flip':
@@ -886,7 +937,14 @@ class DQNet(nn.Module):
         # S_a_encoding = torch.cat([graph_embedding, q_actions], axis=1)
         # S_a_encoding = (self.t9_1(self.t6(dgl.mean_nodes(g, 'h'))).view(batch_size, 1, -1)
         #                 + self.t9_2(self.t7_2(g.ndata['h'][actions_[:, 0], :] + g.ndata['h'][actions_[:, 1], :])).view(batch_size, num_action, -1)).view(batch_size * num_action, -1)
-        Q_sa = self.t5(F.relu(S_a_encoding, inplace=True)).squeeze()
+
+
+        immediate_rewards = peek_greedy_reward(states=g, actions=actions).unsqueeze(1)
+
+        # print('immediate rewards:', immediate_rewards.shape)
+        # print('S_a_encoding', F.relu(S_a_encoding, inplace=True).shape)
+
+        Q_sa = self.t5( torch.cat([F.relu(S_a_encoding, inplace=True), immediate_rewards], dim=1) ).squeeze()
         # Q_sa = self.t5(
         #     F.relu(
         #         (self.t9_1(

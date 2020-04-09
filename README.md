@@ -17,8 +17,8 @@ State-action encoding.
 1. flip mode
 2. m = [2,3,4]
 3. rotate graph when testing
-4. peek reward
-5. reconstruct buffer, save s1, allow q-step
+4. peek reward. sanity check: feed immediate reward, and learn the greedy. 
+5. reconstruct buffer, save s1, allow q-step/TD(lambda)
 6. alter gnn structure for generalization of size
 
 

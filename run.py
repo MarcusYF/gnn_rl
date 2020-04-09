@@ -43,7 +43,7 @@ def latestModelVersion(file):
 # python run.py --gpu=1 --style=er-0.5 --save_folder=dqn_5by6_0324_er0.5_2
 # python run.py --gpu=2 --style=ba-3 --save_folder=dqn_5by6_0324_ba3_2
 parser = argparse.ArgumentParser(description="GNN with RL")
-parser.add_argument('--save_folder', default='dqn_4by4_0407_base_scalegnn')
+parser.add_argument('--save_folder', default='dqn_3by3_0408_greedy_reward_enhance_qstep3')
 parser.add_argument('--train_distr', default='plain', help="")
 parser.add_argument('--test_distr0', default='plain', help="")
 parser.add_argument('--target_mode', default=False)
@@ -54,7 +54,7 @@ parser.add_argument('--m', default='3', help="cluster size")
 parser.add_argument('--ajr', default=8, help="")
 parser.add_argument('--h', default=32, help="hidden dimension")
 parser.add_argument('--rollout_step', default=0)
-parser.add_argument('--q_step', default=1)
+parser.add_argument('--q_step', default=3)
 parser.add_argument('--batch_size', default=500, help='')
 parser.add_argument('--n_episode', default=1, help='')
 parser.add_argument('--episode_len', default=50, help='')
@@ -69,7 +69,7 @@ parser.add_argument('--edge_info', default='adj_dist')
 parser.add_argument('--clip_target', default=0)
 parser.add_argument('--explore_method', default='epsilon_greedy')
 parser.add_argument('--priority_sampling', default=0)
-parser.add_argument('--gamma', type=float, default=0.90, help="")
+parser.add_argument('--gamma', type=float, default=0.95, help="")
 parser.add_argument('--eps0', type=float, default=0.8, help="")
 parser.add_argument('--eps', type=float, default=0.1, help="")
 parser.add_argument('--explore_end_at', type=float, default=0.3, help="")
@@ -203,10 +203,12 @@ if run_validation_33:
         bg_subopt.append(gi)
     bg_subopt = dgl.batch(bg_subopt)
 
-    if ajr == 8:
-        bg_hard.edata['e_type'][:, 0] = torch.ones(N * ajr * bg_hard.batch_size)
-        bg_easy.edata['e_type'][:, 0] = torch.ones(N * ajr * bg_easy.batch_size)
-        bg_subopt.edata['e_type'][:, 0] = torch.ones(N * ajr * bg_subopt.batch_size)
+    for bg_ in [bg_hard, bg_easy, bg_subopt]:
+        if ajr == 8:
+            bg_.edata['e_type'][:, 0] = torch.ones(N * ajr * bg_.batch_size)
+        _, _, square_dist_matrix = dgl.transform.knn_graph(bg_.ndata['x'].view(test_episode, N, -1), ajr+1, extend_info=True)
+        square_dist_matrix = F.relu(square_dist_matrix, inplace=True)  # numerical error could result in NaN in sqrt. value
+        bg_.ndata['adj'] = torch.sqrt(square_dist_matrix).view(bg_.number_of_nodes(), -1)
 else:
     bg_easy = to_cuda(test_problem0.gen_batch_graph(batch_size=test_episode, style=test_graph_style_0))
     bg_hard = to_cuda(test_problem1.gen_batch_graph(batch_size=test_episode, style=test_graph_style_1))
@@ -370,5 +372,17 @@ if __name__ == '__main__':
 #
 # plt.savefig(name + '.png')
 # plt.close()
-
+# with open('/p/reinforcement/data/gnn_rl/model/test_data/3by3/1', 'rb') as valid_file:
+#     validation_problem1 = pickle.load(valid_file)
+# problem = KCut_DGL(k=3, m=3, adjacent_reserve=8, hidden_dim=1)
+# a = 0
+# b = 0
+# c = 0
+# for i in range(100):
+#     problem.g = dc(validation_problem1[i][0].g)
+#     a+=problem.calc_S()
+#     problem.reset_label(label=validation_problem1[i][1])
+#     b+=problem.calc_S()
+#     problem.reset_label(label=validation_problem1[i][2])
+#     c+=problem.calc_S()
 
