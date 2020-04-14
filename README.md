@@ -20,6 +20,8 @@ State-action encoding.
 4. peek reward. sanity check: feed immediate reward, and learn the greedy. 
 5. reconstruct buffer, save s1, allow q-step/TD(lambda)
 6. alter gnn structure for generalization of size
+7. small \gamma is better, why?
+8. greedy benchmark for clustered graph
 
 
 10 by 10 

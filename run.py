@@ -43,7 +43,7 @@ def latestModelVersion(file):
 # python run.py --gpu=1 --style=er-0.5 --save_folder=dqn_5by6_0324_er0.5_2
 # python run.py --gpu=2 --style=ba-3 --save_folder=dqn_5by6_0324_ba3_2
 parser = argparse.ArgumentParser(description="GNN with RL")
-parser.add_argument('--save_folder', default='dqn_3by3_0408_greedy_reward_enhance_qstep3')
+parser.add_argument('--save_folder', default='dqn_3by3_0414_oldGNN_2')
 parser.add_argument('--train_distr', default='plain', help="")
 parser.add_argument('--test_distr0', default='plain', help="")
 parser.add_argument('--target_mode', default=False)
@@ -54,7 +54,7 @@ parser.add_argument('--m', default='3', help="cluster size")
 parser.add_argument('--ajr', default=8, help="")
 parser.add_argument('--h', default=32, help="hidden dimension")
 parser.add_argument('--rollout_step', default=0)
-parser.add_argument('--q_step', default=3)
+parser.add_argument('--q_step', default=1)
 parser.add_argument('--batch_size', default=500, help='')
 parser.add_argument('--n_episode', default=1, help='')
 parser.add_argument('--episode_len', default=50, help='')
@@ -69,8 +69,8 @@ parser.add_argument('--edge_info', default='adj_dist')
 parser.add_argument('--clip_target', default=0)
 parser.add_argument('--explore_method', default='epsilon_greedy')
 parser.add_argument('--priority_sampling', default=0)
-parser.add_argument('--gamma', type=float, default=0.95, help="")
-parser.add_argument('--eps0', type=float, default=0.8, help="")
+parser.add_argument('--gamma', type=float, default=0.9, help="")
+parser.add_argument('--eps0', type=float, default=0.5, help="")
 parser.add_argument('--eps', type=float, default=0.1, help="")
 parser.add_argument('--explore_end_at', type=float, default=0.3, help="")
 parser.add_argument('--lr', type=float, default=0.001, help="learning rate")
@@ -129,6 +129,7 @@ rollout_step = int(args['rollout_step'])
 q_step = int(args['q_step'])
 n_epoch = int(args['n_epoch'])
 explore_end_at = float(args['explore_end_at'])
+# eps = np.exp( np.linspace( np.log( float(args['eps0']) ), np.log( float(args['eps'])), int(n_epoch * explore_end_at)) )
 eps = np.linspace(float(args['eps0']), float(args['eps']), int(n_epoch * explore_end_at))
 save_ckpt_step = int(args['save_ckpt_step'])
 ddqn = bool(args['ddqn'])
@@ -237,6 +238,17 @@ def run_dqn(alg):
             alg.eps = eps[-1]
         else:
             alg.eps = eps[n_iter]
+
+        # if n_iter < 2500:
+        #     alg.gamma = 0
+        # elif n_iter < 5000:
+        #     alg.gamma = 0.3
+        # elif n_iter < 7500:
+        #     alg.gamma = 0.5
+        # elif n_iter < 10000:
+        #     alg.gamma = 0.7
+        # elif n_iter < 15000:
+        #     alg.gamma = 0.9
 
         T11 = time.time()
         # TODO memory usage :: episode_len * num_episodes * hidden_dim
