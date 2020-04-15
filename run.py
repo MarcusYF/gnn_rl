@@ -43,7 +43,7 @@ def latestModelVersion(file):
 # python run.py --gpu=1 --style=er-0.5 --save_folder=dqn_5by6_0324_er0.5_2
 # python run.py --gpu=2 --style=ba-3 --save_folder=dqn_5by6_0324_ba3_2
 parser = argparse.ArgumentParser(description="GNN with RL")
-parser.add_argument('--save_folder', default='dqn_3by3_0414_oldGNN_2')
+parser.add_argument('--save_folder', default='dqn_3by3_0414_oldGNN_3')
 parser.add_argument('--train_distr', default='plain', help="")
 parser.add_argument('--test_distr0', default='plain', help="")
 parser.add_argument('--target_mode', default=False)
@@ -70,7 +70,7 @@ parser.add_argument('--clip_target', default=0)
 parser.add_argument('--explore_method', default='epsilon_greedy')
 parser.add_argument('--priority_sampling', default=0)
 parser.add_argument('--gamma', type=float, default=0.9, help="")
-parser.add_argument('--eps0', type=float, default=0.5, help="")
+parser.add_argument('--eps0', type=float, default=0.8, help="")
 parser.add_argument('--eps', type=float, default=0.1, help="")
 parser.add_argument('--explore_end_at', type=float, default=0.3, help="")
 parser.add_argument('--lr', type=float, default=0.001, help="learning rate")
