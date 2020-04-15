@@ -43,7 +43,7 @@ def latestModelVersion(file):
 # python run.py --gpu=1 --style=er-0.5 --save_folder=dqn_5by6_0324_er0.5_2
 # python run.py --gpu=2 --style=ba-3 --save_folder=dqn_5by6_0324_ba3_2
 parser = argparse.ArgumentParser(description="GNN with RL")
-parser.add_argument('--save_folder', default='dqn_3by3_0402_rollout_top10step5')
+parser.add_argument('--save_folder', default='dqn_3by3_0414_oldGNN_4')
 parser.add_argument('--train_distr', default='plain', help="")
 parser.add_argument('--test_distr0', default='plain', help="")
 parser.add_argument('--target_mode', default=False)
@@ -53,7 +53,7 @@ parser.add_argument('--k', default=3, help="size of K-cut")
 parser.add_argument('--m', default=3, help="cluster size")
 parser.add_argument('--ajr', default=8, help="")
 parser.add_argument('--h', default=32, help="hidden dimension")
-parser.add_argument('--rollout_step', default=10)
+parser.add_argument('--rollout_step', default=0)
 parser.add_argument('--q_step', default=1)
 parser.add_argument('--batch_size', default=500, help='')
 parser.add_argument('--n_episode', default=1, help='')
