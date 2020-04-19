@@ -452,6 +452,7 @@ class DQN:
         # S = torch.cat([tpl.s.unsqueeze(0) for tpl in sample_buffer])
         # best_S = torch.cat([tpl.best_s.unsqueeze(0).cuda() for tpl in sample_buffer])
         # internal_R = F.relu(best_S.cuda() - S + R)
+        print('chosen_actions', R)
 
         if rollout_step:
             rollout_R = torch.cat([R.unsqueeze(1), torch.cat([tpl.rollout_r.unsqueeze(0) for tpl in sample_buffer])], dim=1)
