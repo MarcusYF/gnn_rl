@@ -738,7 +738,7 @@ class DQNet(nn.Module):
                            , dropout=0.0
                            , activate_linear=True)
         # baseline
-        self.t5 = nn.Linear(self.hidden_dim + 1, 1)
+        self.t5 = nn.Linear(self.hidden_dim, 1)
         self.t6 = nn.Linear(self.hidden_dim, self.hidden_dim)
         # self.t66 = nn.Linear(5, self.hidden_dim)
         # # for centroid graph representation
@@ -939,12 +939,12 @@ class DQNet(nn.Module):
         #                 + self.t9_2(self.t7_2(g.ndata['h'][actions_[:, 0], :] + g.ndata['h'][actions_[:, 1], :])).view(batch_size, num_action, -1)).view(batch_size * num_action, -1)
 
 
-        immediate_rewards = peek_greedy_reward(states=g, actions=actions).unsqueeze(1)
+        # immediate_rewards = peek_greedy_reward(states=g, actions=actions).unsqueeze(1)
 
         # print('immediate rewards:', immediate_rewards.shape)
         # print('S_a_encoding', F.relu(S_a_encoding, inplace=True).shape)
 
-        Q_sa = self.t5( torch.cat([F.relu(S_a_encoding, inplace=True), immediate_rewards], dim=1) ).squeeze()
+        Q_sa = self.t5( torch.cat([F.relu(S_a_encoding, inplace=True)], dim=1) ).squeeze()
         # Q_sa = self.t5(
         #     F.relu(
         #         (self.t9_1(
