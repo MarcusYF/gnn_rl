@@ -33,17 +33,15 @@ def latestModelVersion(file):
                 versions.append(int(f.split('_')[-1]))
     return max(versions)
 
-# python run.py --gpu=0 --save_folder=dqn_0110_test_extend_h --extend_h=False --n_epoch=5000 --save_ckpt_step=500
-# python run.py --gpu=1 --save_folder=dqn_0110_test_q_step2 --q_step=2 --n_epoch=5000 --save_ckpt_step=500
-# python run.py --gpu=2 --save_folder=dqn_0110_test_gamma95 --gamma=0.95 --n_epoch=5000 --save_ckpt_step=500
-# python run.py --gpu=1 --save_folder=dqn_0113_test_eps1 --explore_end_at=0.6 --eps=0.1
-# python run.py --gpu=0 --save_folder=dqn_0113_test_eps0 --eps=0.3
-# python run.py --gpu=1 --save_folder=dqn_0124_test_fix_target_0
-# args
-# python run.py --gpu=1 --style=er-0.5 --save_folder=dqn_5by6_0324_er0.5_2
-# python run.py --gpu=2 --style=ba-3 --save_folder=dqn_5by6_0324_ba3_2
+# server 2,3
+model_folder = '/p/reinforcement/data/gnn_rl/model/dqn/'
+log_folder = '/u/fy4bc/code/research/RL4CombOptm/gnn_rl/runs/'
+# server 1
+model_folder = '/home/fy4bc/mnt/data/gnn_rl/model/dqn/'
+log_folder = '/home/fy4bc/mnt/data/gnn_rl/logs/runs/'
+
 parser = argparse.ArgumentParser(description="GNN with RL")
-parser.add_argument('--save_folder', default='9180a2b')
+parser.add_argument('--save_folder', default='recover_leak')
 parser.add_argument('--train_distr', default='plain', help="")
 parser.add_argument('--test_distr0', default='plain', help="")
 parser.add_argument('--target_mode', default=False)
@@ -138,7 +136,7 @@ os.environ['CUDA_VISIBLE_DEVICES'] = gpu
 # current working path
 # absroot = os.path.dirname(os.getcwd())
 # path = os.path.abspath(os.path.join(os.getcwd(), "..")) + '/Models/' + save_folder + '/'
-path = '/p/reinforcement/data/gnn_rl/model/dqn/' + save_folder + '/'
+path = model_folder + save_folder + '/'
 if not os.path.exists(path):
     os.makedirs(path)
 
@@ -228,7 +226,7 @@ if target_mode:
 def run_dqn(alg):
 
     t = 0
-    writer = SummaryWriter('/u/fy4bc/code/research/RL4CombOptm/gnn_rl/runs/' + save_folder)
+    writer = SummaryWriter(log_folder + save_folder)
     for n_iter in tqdm(range(n_epoch)):
 
         T1 = time.time()
