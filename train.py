@@ -5,8 +5,8 @@ Created on Sat Mar  2 16:30:53 2019
 @author: fy4bc
 """
 
-from DQN import DQN, to_cuda
-from k_cut import *
+from ddqn import DQN
+from envs import *
 import argparse
 import numpy as np
 import time
@@ -14,7 +14,7 @@ import os
 import pickle
 from tqdm import tqdm
 import json
-from Analysis.episode_stats import test_summary
+from validation import test_summary
 from torch.utils.tensorboard import SummaryWriter
 
 print('new job..')
@@ -141,26 +141,22 @@ path = model_folder + save_folder + '/'
 if not os.path.exists(path):
     os.makedirs(path)
 
-problem = KCut_DGL(k=k, m=m, adjacent_reserve=ajr, hidden_dim=h, mode=problem_mode, sample_episode=n_episode, graph_style=train_graph_style)
-# test_problem0 = KCut_DGL(k=k, m=4, adjacent_reserve=15, hidden_dim=h, mode=problem_mode, sample_episode=test_episode)
-# test_problem1 = KCut_DGL(k=k, m=4+1, adjacent_reserve=19, hidden_dim=h, mode=problem_mode, sample_episode=test_episode)
-# test_problem2 = KCut_DGL(k=k, m=4+5, adjacent_reserve=23, hidden_dim=h, mode=problem_mode, sample_episode=test_episode)
-test_problem0 = problem
-test_problem1 = problem
-test_problem2 = problem
+
+G = GraphGenerator(k=k, m=m, ajr=ajr, style=train_graph_style)
+test_problem0 = G
+test_problem1 = G
+test_problem2 = G
 
 # model to be trained
-alg = DQN(problem, action_type=action_type
+alg = DQN(graph_generator=G, hidden_dim=h, action_type=action_type
               , gamma=gamma, eps=.1, lr=lr, action_dropout=action_dropout
               , sample_batch_episode=sample_batch_episode
               , replay_buffer_max_size=replay_buffer_size
               , epi_len=episode_len
               , new_epi_batch_size=n_episode
-              , edge_info=edge_info
-              , readout=readout
+              , cuda_flag=True
               , explore_method=explore_method
-              , priority_sampling=priority_sampling
-              , clip_target=clip_target)
+              , priority_sampling=priority_sampling)
 if not resume:
     model_version = 0
     with open(path + 'dqn_0', 'wb') as model_file:
@@ -186,37 +182,11 @@ with open(path + 'params', mode) as params_file:
     params_file.write('\n------------------------------------\n')
 
 
-# load validation set
-if run_validation_33:
-    with open('/p/reinforcement/data/gnn_rl/model/test_data/3by3/0', 'rb') as valid_file:
-        validation_problem0 = pickle.load(valid_file)
-    with open('/p/reinforcement/data/gnn_rl/model/test_data/3by3/1', 'rb') as valid_file:
-        validation_problem1 = pickle.load(valid_file)
-    bg_hard = to_cuda(dgl.batch([p[0].g for p in validation_problem0[:test_episode]]))
-    bg_easy = to_cuda(dgl.batch([p[0].g for p in validation_problem1[:test_episode]]))
+bg_easy = test_problem0.generate_graph(batch_size=test_episode, style=test_graph_style_0, seed=test_seed0)
+bg_hard = test_problem1.generate_graph(batch_size=test_episode, style=test_graph_style_1, seed=test_seed1)
+bg_subopt = test_problem2.generate_graph(batch_size=test_episode, style=test_graph_style_2, seed=test_seed2)
 
-    bg_subopt = []
-    for i in range(test_episode):
-        gi = to_cuda(validation_problem0[:test_episode][i][0].g)
-        problem.reset_label(g=gi, label=validation_problem0[:test_episode][i][2])
-        bg_subopt.append(gi)
-    bg_subopt = dgl.batch(bg_subopt)
-
-    for bg_ in [bg_hard, bg_easy, bg_subopt]:
-        if ajr == 8:
-            bg_.edata['e_type'][:, 0] = torch.ones(N * ajr * bg_.batch_size)
-        _, _, square_dist_matrix = dgl.transform.knn_graph(bg_.ndata['x'].view(test_episode, N, -1), ajr+1, extend_info=True)
-        square_dist_matrix = F.relu(square_dist_matrix, inplace=True)  # numerical error could result in NaN in sqrt. value
-        bg_.ndata['adj'] = torch.sqrt(square_dist_matrix).view(bg_.number_of_nodes(), -1)
-else:
-    bg_easy = to_cuda(test_problem0.gen_batch_graph(batch_size=test_episode, style=test_graph_style_0, seed=test_seed0))
-    bg_hard = to_cuda(test_problem1.gen_batch_graph(batch_size=test_episode, style=test_graph_style_1, seed=test_seed1))
-    bg_subopt = to_cuda(test_problem2.gen_batch_graph(batch_size=test_episode, style=test_graph_style_2, seed=test_seed2))
-
-    print('bg_easy.ndata[x][0]', bg_easy.ndata['x'][0])
-    # bg_easy = to_cuda(problem.gen_batch_graph(batch_size=test_episode, style=test_graph_style_0))  # 1
-    # bg_hard = to_cuda(problem.gen_batch_graph(batch_size=test_episode, style=test_graph_style_1))  # 0
-    # bg_subopt = to_cuda(problem.gen_batch_graph(batch_size=test_episode, style=test_graph_style_2))  # 2
+print('bg_easy.ndata[x][0]', bg_easy.ndata['x'][0])
 
 target_bg = None
 if target_mode:
@@ -275,114 +245,30 @@ def run_dqn(alg):
         if n_iter % 100 == 0:
             test = test_summary(alg=alg, problem=test_problem1, action_type=action_type, q_net=readout, forbid_revisit=0)
 
-            test.run_test(problem=to_cuda(bg_hard), trial_num=1, batch_size=100, gnn_step=gnn_step,
+            test.run_test(problem=bg_hard, trial_num=1, batch_size=100, gnn_step=gnn_step,
                           episode_len=episode_len, explore_prob=0.0, Temperature=1e-8)
             epi_r0 = test.show_result()
-            if run_validation_33:
-                best_hit0 = test.compare_opt(validation_problem0)
+
 
             test.problem = test_problem0
-            test.run_test(problem=to_cuda(bg_easy), trial_num=1, batch_size=test_episode, gnn_step=gnn_step,
+            test.run_test(problem=bg_easy, trial_num=1, batch_size=test_episode, gnn_step=gnn_step,
                           episode_len=episode_len, explore_prob=0.0, Temperature=1e-8)
             epi_r1 = test.show_result()
-            if run_validation_33:
-                best_hit1 = test.compare_opt(validation_problem1)
+
 
             test.problem = test_problem2
-            test.run_test(problem=to_cuda(bg_subopt), trial_num=1, batch_size=100, gnn_step=gnn_step,
+            test.run_test(problem=bg_subopt, trial_num=1, batch_size=100, gnn_step=gnn_step,
                           episode_len=episode_len, explore_prob=0.0, Temperature=1e-8)
             epi_r2 = test.show_result()
-            if run_validation_33:
-                best_hit2 = test.compare_opt(validation_problem0)
+
 
         writer.add_scalar('Reward/Training Episode Reward', log.get_current('tot_return') / n_episode, n_iter)
         writer.add_scalar('Loss/Q-Loss', log.get_current('Q_error'), n_iter)
         writer.add_scalar('Reward/Validation Episode Reward - hard', epi_r0, n_iter)
         writer.add_scalar('Reward/Validation Episode Reward - easy', epi_r1, n_iter)
         writer.add_scalar('Reward/Validation Episode Reward - subopt', epi_r2, n_iter)
-        if run_validation_33:
-            writer.add_scalar('Reward/Validation Opt. hit percent - hard', best_hit0, n_iter)
-            writer.add_scalar('Reward/Validation Opt. hit percent - easy', best_hit1, n_iter)
-            writer.add_scalar('Reward/Validation Opt. hit percent - subopt', best_hit2, n_iter)
         writer.add_scalar('Time/Running Time per Epoch', T2 - T1, n_iter)
 
 if __name__ == '__main__':
 
     run_dqn(alg)
-
-# sample_buffer = alg[4]
-# batch_begin_state = dgl.batch([tpl.s0 for tpl in sample_buffer])
-# batch_begin_action = torch.cat([tpl.a.unsqueeze(0) for tpl in sample_buffer], axis=0)
-#
-# problem = KCut_DGL(k=10, m=10, adjacent_reserve=20, hidden_dim=64)
-#
-# batch_begin_state1 = problem.gen_batch_graph(batch_size=1, hidden_dim=64)
-# batch_begin_action1 = problem.get_legal_actions(batch_begin_state1).cuda()
-#
-# _,_,_,Q_sa=alg[0].forward(to_cuda(batch_begin_state1), batch_begin_action1[0].unsqueeze(0))
-#
-# import matplotlib.pyplot as plt
-# from k_cut import *
-#
-#
-#
-# test_problem0 = KCut_DGL(k=4, m=5, adjacent_reserve=19, hidden_dim=1)
-# bg_easy = to_cuda(test_problem0.gen_batch_graph(batch_size=1, style='cluster-2'))
-# problem=bg_easy
-# k=4
-# topo='cut'
-# name='/u/fy4bc/u/fy4bc/code/research/RL4CombOptm/gnn_rl/toy_models/figs/test1'
-#
-# plt.figure(figsize=(5,5))
-# if isinstance(problem, dgl.DGLGraph):
-#     g = problem
-#     k = k
-# else:
-#     k = problem.k
-#     g = problem.g
-# X = g.ndata['x'].cpu()
-# n = X.shape[0]
-# label = g.ndata['label'].cpu()
-# link = dc(g.edata['e_type'].view(n, n - 1, 2).cpu())
-# # c = ['r', 'b', 'y']
-# plt.cla()
-# c = ['r', 'b', 'y', 'k', 'g', 'c', 'm', 'tan', 'peru', 'pink']
-# for i in range(k):
-#     a = X[(label[:, i] > 0).nonzero().squeeze()]
-#     if a.shape[0] > .5:
-#         a = a.view(-1, 2)
-#         plt.scatter(a[:, 0], a[:, 1], s=60, c=[c[i]]*(n//k))
-#
-# for i in range(n):
-#     plt.annotate(str(i), xy=(X[i, 0], X[i, 1]))
-#     for j in range(n - 1):
-#         if link[i, j][0].item() == 1:
-#             j_ = j
-#             if j >= i:
-#                 j_ = j + 1
-#             # plt.plot([X[i, 0], X[j_, 0]], [X[i, 1], X[j_, 1]], ':', color='k')
-#
-#     if topo == 'cut':
-#         for j in range(n - 1):
-#             if link[i, j][1].item() + link[i, j][0].item() > 1.5:
-#                 j_ = j
-#                 if j >= i:
-#                     j_ = j + 1
-#                 # plt.plot([X[i, 0], X[j_, 0]], [X[i, 1], X[j_, 1]], '-', color='k')
-#
-# plt.savefig(name + '.png')
-# plt.close()
-# with open('/p/reinforcement/data/gnn_rl/model/test_data/3by3/1', 'rb') as valid_file:
-#     validation_problem1 = pickle.load(valid_file)
-# problem = KCut_DGL(k=3, m=3, adjacent_reserve=8, hidden_dim=1)
-# a = 0
-# b = 0
-# c = 0
-# for i in range(100):
-#     problem.g = dc(validation_problem1[i][0].g)
-#     a+=problem.calc_S()
-#     problem.reset_label(label=validation_problem1[i][1])
-#     b+=problem.calc_S()
-#     problem.reset_label(label=validation_problem1[i][2])
-#     c+=problem.calc_S()
-
