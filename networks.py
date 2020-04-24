@@ -3,7 +3,7 @@ from copy import deepcopy as dc
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from envs import *
 
 class GCN(nn.Module):
     def __init__(self, k, hidden_dim, activation=F.relu):
@@ -12,7 +12,7 @@ class GCN(nn.Module):
         self.l2 = nn.Linear(hidden_dim, hidden_dim)
         self.activ = activation
 
-    def forward(self, graphs, feature):
+    def forward(self, graphs, feature, use_label=True):
 
         b = graphs.batch_size
         n = graphs.n
@@ -23,7 +23,10 @@ class GCN(nn.Module):
 
         n1_h = torch.bmm(adjM.view(b, n, n), feature.view(b, n, -1)).view(b * n, -1)  # (bn, h)
 
-        h = self.activ(self.l1(l) + self.l2(n1_h), inplace=True)
+        if use_label:
+            h = self.activ(self.l1(l) + self.l2(n1_h), inplace=True)
+        else:
+            h = self.activ(self.l2(n1_h), inplace=True)
 
         return h
 
@@ -54,6 +57,7 @@ class DQNet(nn.Module):
 
         h = torch.zeros((bn, self.hidden_dim))
         # h[:, 0] += n
+        # print('graphs.in_cuda', graphs.in_cuda)
         if graphs.in_cuda:
             h = h.cuda()
 
@@ -130,12 +134,12 @@ class DQNet(nn.Module):
         #                 + self.t9_2(self.t7_2(g.ndata['h'][actions_[:, 0], :] + g.ndata['h'][actions_[:, 1], :])).view(batch_size, num_action, -1)).view(batch_size * num_action, -1)
 
 
-        # immediate_rewards = peek_greedy_reward(states=g, actions=actions).unsqueeze(1)
+        # immediate_rewards = peek_greedy_reward(states=graphs, actions=actions).unsqueeze(1)
 
         # print('immediate rewards:', immediate_rewards.shape)
         # print('S_a_encoding', F.relu(S_a_encoding, inplace=True).shape)
 
-        Q_sa = self.t5( torch.cat([F.relu(S_a_encoding, inplace=True)], dim=1) ).squeeze()
+        Q_sa = self.t5( torch.cat([F.relu(S_a_encoding, inplace=True) ], dim=1) ).squeeze()
         # Q_sa = self.t5(
         #     F.relu(
         #         (self.t9_1(
@@ -155,3 +159,63 @@ class DQNet(nn.Module):
 
 # dqn = DQNet(3, 16)
 # dqn.forward(gg, a[:10, :])
+
+
+class DSNet(nn.Module):
+    def __init__(self, k, hidden_dim, softmax_tau=1.0, gnn_step=3):
+        super(DSNet, self).__init__()
+        self.k = k
+        self.hidden_dim = hidden_dim
+        self.layers = nn.ModuleList([GCN(k, hidden_dim)])
+        # baseline
+        self.l1 = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.l2 = nn.Linear(self.hidden_dim, self.k)
+        # parameters
+        self.softmax_tau = softmax_tau
+        self.gnn_step = gnn_step
+
+    def forward(self, graphs, tau=None):
+
+        if tau is None:
+            tau = self.softmax_tau
+
+        n = graphs.n
+        b = graphs.batch_size
+        bn = b * n
+
+        h = torch.ones((bn, self.hidden_dim))
+
+        if graphs.in_cuda:
+            h = h.cuda()
+
+        for _ in range(self.gnn_step):
+            h = self.layers[0].forward(graphs, h, use_label=False)  # (bn, h)
+
+        node_embedding = h.view(b, n, -1)  # (b, n, h)
+
+        # 2-layer MLP
+        H = F.relu(self.l2(F.relu(self.l1(node_embedding))))  # (b, n, k)
+        # H /= H.sum(dim=2).unsqueeze(2)  # normalize to probability distribution
+
+        # Gumbel softmax
+        # P_label = H
+        P_label = F.gumbel_softmax(H, tau=tau, hard=True)  # (b, n, k)
+        # torch.bmm(torch.bmm(P_label.t(), graphs.ndata['adj'].view(b, n, n)), P_label)  # (b, k, k)
+
+        if graphs.in_cuda:
+            return (torch.bmm(torch.bmm(P_label.transpose(1, 2), graphs.ndata['adj'].view(b, n, n)), P_label) * torch.eye(self.k).repeat(b, 1, 1).cuda()).sum(dim=2).sum(dim=1) / 2
+        else:
+            return (torch.bmm(torch.bmm(P_label.transpose(1, 2), graphs.ndata['adj'].view(b, n, n)),
+                              P_label) * torch.eye(self.k).repeat(b, 1, 1)).sum(dim=2).sum(dim=1) / 2
+
+
+# G = GraphGenerator(3,[3,4,5],8, style='plain')
+# g1 = G.generate_graph(batch_size=1, cuda_flag=True)
+# g2 = G.generate_graph(batch_size=1, cuda_flag=True)
+# gg = make_batch([g1, g2])
+# dsn = DSNet(3, 16).cuda()
+# dsn.forward(gg)
+#
+# gnn = GCN(k=3, hidden_dim=16).cuda()
+# h = torch.zeros(24, 16).cuda()
+# h = gnn.forward(gg, h)

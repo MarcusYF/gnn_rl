@@ -132,7 +132,7 @@ class GraphGenerator:
         else:
             _, neighbor_idx, square_dist_matrix = dgl.transform.knn_graph(bg.ndata['x'].view(batch_size, n, -1), ajr + 1, extend_info=True)
             square_dist_matrix = F.relu(square_dist_matrix, inplace=True)  # numerical error could result in NaN in sqrt. value
-            bg.ndata['adj'] = torch.sqrt(square_dist_matrix).view(bg.number_of_nodes(), -1)
+            bg.ndata['adj'] = torch.sqrt(square_dist_matrix).view(bg.n * bg.batch_size, -1)
             # scale d (maintain avg=0.5):
             if style != 'plain':
                 bg.ndata['adj'] /= (bg.ndata['adj'].sum() / (bg.ndata['adj'].shape[0]**2) / 0.5)
@@ -172,7 +172,7 @@ def make_batch(graphs):
                     , graphs[0].number_of_nodes()
                     , graphs[0].k
                     , graphs[0].m
-                    , len(graphs) * graphs.batch_size
+                    , len(graphs) * graphs[0].batch_size
                     , {}, {}, torch.zeros(len(graphs)))
 
     for node_attr in graphs[0].ndata.keys():

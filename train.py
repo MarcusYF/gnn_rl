@@ -37,24 +37,25 @@ def latestModelVersion(file):
 model_folder = '/p/reinforcement/data/gnn_rl/model/dqn/'
 log_folder = '/u/fy4bc/code/research/RL4CombOptm/gnn_rl/runs/'
 # server 1
+cuda_flag = True
 test_seed0, test_seed1, test_seed2 = 1, 11, 111
 model_folder = '/home/fy4bc/mnt/data/gnn_rl/model/dqn/'
 log_folder = '/home/fy4bc/mnt/data/gnn_rl/logs/runs/'
 
 parser = argparse.ArgumentParser(description="GNN with RL")
-parser.add_argument('--save_folder', default='dqn_3by3_0421_1')
+parser.add_argument('--save_folder', default='dqn_5by10_0424_1')
 parser.add_argument('--train_distr', default='plain', help="")
 parser.add_argument('--test_distr0', default='plain', help="")
 parser.add_argument('--target_mode', default=False)
 parser.add_argument('--test_distr1', default='plain', help="")
 parser.add_argument('--test_distr2', default='plain', help="")
-parser.add_argument('--k', default=3, help="size of K-cut")
-parser.add_argument('--m', default='3', help="cluster size")
-parser.add_argument('--ajr', default=8, help="")
-parser.add_argument('--h', default=32, help="hidden dimension")
+parser.add_argument('--k', default=5, help="size of K-cut")
+parser.add_argument('--m', default='10', help="cluster size")
+parser.add_argument('--ajr', default=30, help="")
+parser.add_argument('--h', default=64, help="hidden dimension")
 parser.add_argument('--rollout_step', default=0)
 parser.add_argument('--q_step', default=1)
-parser.add_argument('--batch_size', default=500, help='')
+parser.add_argument('--batch_size', default=100, help='')
 parser.add_argument('--n_episode', default=1, help='')
 parser.add_argument('--episode_len', default=50, help='')
 parser.add_argument('--action_type', default='swap', help="")
@@ -68,14 +69,14 @@ parser.add_argument('--edge_info', default='adj_dist')
 parser.add_argument('--clip_target', default=0)
 parser.add_argument('--explore_method', default='epsilon_greedy')
 parser.add_argument('--priority_sampling', default=0)
-parser.add_argument('--gamma', type=float, default=0.9, help="")
+parser.add_argument('--gamma', type=float, default=0.0, help="")
 parser.add_argument('--eps0', type=float, default=0.5, help="")
 parser.add_argument('--eps', type=float, default=0.1, help="")
-parser.add_argument('--explore_end_at', type=float, default=0.9, help="")
+parser.add_argument('--explore_end_at', type=float, default=0.1, help="")
 parser.add_argument('--lr', type=float, default=0.001, help="learning rate")
 parser.add_argument('--action_dropout', type=float, default=1.0)
-parser.add_argument('--n_epoch', default=30000)
-parser.add_argument('--save_ckpt_step', default=30000)
+parser.add_argument('--n_epoch', default=100000)
+parser.add_argument('--save_ckpt_step', default=100000)
 parser.add_argument('--target_update_step', default=5)
 parser.add_argument('--replay_buffer_size', default=5000, help="")
 parser.add_argument('--test_batch_size', default=100, help='')
@@ -154,7 +155,7 @@ alg = DQN(graph_generator=G, hidden_dim=h, action_type=action_type
               , replay_buffer_max_size=replay_buffer_size
               , epi_len=episode_len
               , new_epi_batch_size=n_episode
-              , cuda_flag=True
+              , cuda_flag=cuda_flag
               , explore_method=explore_method
               , priority_sampling=priority_sampling)
 if not resume:
@@ -182,9 +183,9 @@ with open(path + 'params', mode) as params_file:
     params_file.write('\n------------------------------------\n')
 
 
-bg_easy = test_problem0.generate_graph(batch_size=test_episode, style=test_graph_style_0, seed=test_seed0)
-bg_hard = test_problem1.generate_graph(batch_size=test_episode, style=test_graph_style_1, seed=test_seed1)
-bg_subopt = test_problem2.generate_graph(batch_size=test_episode, style=test_graph_style_2, seed=test_seed2)
+bg_easy = test_problem0.generate_graph(batch_size=test_episode, style=test_graph_style_0, seed=test_seed0, cuda_flag=cuda_flag)
+bg_hard = test_problem1.generate_graph(batch_size=test_episode, style=test_graph_style_1, seed=test_seed1, cuda_flag=cuda_flag)
+bg_subopt = test_problem2.generate_graph(batch_size=test_episode, style=test_graph_style_2, seed=test_seed2, cuda_flag=cuda_flag)
 
 print('bg_easy.ndata[x][0]', bg_easy.ndata['x'][0])
 
@@ -205,6 +206,12 @@ def run_dqn(alg):
 
         if n_iter > len(eps) - 1:
             alg.eps = eps[-1]
+            if n_iter > 30000:
+                alg.eps = 0.05
+            if n_iter > 50000:
+                alg.eps = 0.01
+            if n_iter > 90000:
+                alg.eps = 0
         else:
             alg.eps = eps[n_iter]
 
@@ -243,31 +250,36 @@ def run_dqn(alg):
 
         # test summary
         if n_iter % 100 == 0:
-            test = test_summary(alg=alg, problem=test_problem1, action_type=action_type, q_net=readout, forbid_revisit=0)
+            test = test_summary(alg=alg, graph_generator=G, action_type=action_type, q_net=readout, forbid_revisit=0)
 
             test.run_test(problem=bg_hard, trial_num=1, batch_size=100, gnn_step=gnn_step,
-                          episode_len=episode_len, explore_prob=0.0, Temperature=1e-8)
+                          episode_len=episode_len, explore_prob=0.0, Temperature=1e-8, cuda_flag=cuda_flag)
             epi_r0 = test.show_result()
 
 
-            test.problem = test_problem0
-            test.run_test(problem=bg_easy, trial_num=1, batch_size=test_episode, gnn_step=gnn_step,
-                          episode_len=episode_len, explore_prob=0.0, Temperature=1e-8)
-            epi_r1 = test.show_result()
-
-
-            test.problem = test_problem2
-            test.run_test(problem=bg_subopt, trial_num=1, batch_size=100, gnn_step=gnn_step,
-                          episode_len=episode_len, explore_prob=0.0, Temperature=1e-8)
-            epi_r2 = test.show_result()
+            # test.problem = test_problem0
+            # test.run_test(problem=bg_easy, trial_num=1, batch_size=test_episode, gnn_step=gnn_step,
+            #               episode_len=episode_len, explore_prob=0.0, Temperature=1e-8, cuda_flag=cuda_flag)
+            # epi_r1 = test.show_result()
+            #
+            #
+            # test.problem = test_problem2
+            # test.run_test(problem=bg_subopt, trial_num=1, batch_size=100, gnn_step=gnn_step,
+            #               episode_len=episode_len, explore_prob=0.0, Temperature=1e-8, cuda_flag=cuda_flag)
+            # epi_r2 = test.show_result()
 
 
         writer.add_scalar('Reward/Training Episode Reward', log.get_current('tot_return') / n_episode, n_iter)
         writer.add_scalar('Loss/Q-Loss', log.get_current('Q_error'), n_iter)
         writer.add_scalar('Reward/Validation Episode Reward - hard', epi_r0, n_iter)
-        writer.add_scalar('Reward/Validation Episode Reward - easy', epi_r1, n_iter)
-        writer.add_scalar('Reward/Validation Episode Reward - subopt', epi_r2, n_iter)
+        # writer.add_scalar('Reward/Validation Episode Reward - easy', epi_r1, n_iter)
+        # writer.add_scalar('Reward/Validation Episode Reward - subopt', epi_r2, n_iter)
         writer.add_scalar('Time/Running Time per Epoch', T2 - T1, n_iter)
+        writer.add_scalar('Signal/R_nonzero', log.get_current('R_signal_nonzero'), n_iter)
+        writer.add_scalar('Signal/R_posi_len', log.get_current('R_signal_posi_len'), n_iter)
+        writer.add_scalar('Signal/R_nega_len', log.get_current('R_signal_nega_len'), n_iter)
+        writer.add_scalar('Signal/R_posi_mean', log.get_current('R_signal_posi_mean'), n_iter)
+        writer.add_scalar('Signal/R_nega_mean', log.get_current('R_signal_nega_mean'), n_iter)
 
 if __name__ == '__main__':
 

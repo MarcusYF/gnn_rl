@@ -30,27 +30,28 @@ class test_summary:
 
         self.state_eval = []
 
-    def run_test(self, problem=None, init_trial=10, trial_num=1, batch_size=100, gnn_step=3, episode_len=50, explore_prob=0.1, Temperature=1.0, aux_model=None, beta=0):
+    def run_test(self, problem=None, init_trial=10, trial_num=1, batch_size=100, gnn_step=3, episode_len=50, explore_prob=0.1, Temperature=1.0, cuda_flag=True):
         self.episode_len = episode_len
         self.trial_num = trial_num
         self.batch_size = batch_size
         if problem is None:
             batch_size *= trial_num
-            bg = self.graph_generator.generate_graph(batch_size=self.batch_size)
-            self.bg = self.graph_generator.generate_graph(x=bg.ndata['x'].repeat(trial_num, 1), batch_size=batch_size)
+            bg = self.graph_generator.generate_graph(batch_size=self.batch_size, cuda_flag=cuda_flag)
+            self.bg = self.graph_generator.generate_graph(x=bg.ndata['x'].repeat(trial_num, 1), batch_size=batch_size, cuda_flag=cuda_flag)
             gl = un_batch(self.bg)
         else:
             # for validation problem set
-            self.bg = problem
+            self.bg = dc(problem)
             gl = un_batch(self.bg)
 
         self.num_actions = get_legal_actions(states=self.bg, action_type=self.action_type).shape[0] // self.bg.batch_size
 
         self.action_mask = torch.tensor(range(0, self.num_actions * batch_size, self.num_actions))
+
         if self.bg.in_cuda:
             self.action_mask = self.action_mask.cuda()
 
-        self.S = self.bg.kcut_value
+        self.S = self.bg.kcut_value.clone()
 
         ep = [EpisodeHistory(gl[i], max_episode_len=episode_len, action_type='swap') for i in range(batch_size)]
         self.end_of_episode = {}.fromkeys(range(batch_size), episode_len-1)
@@ -76,8 +77,12 @@ class test_summary:
 
             chose_actions = torch.tensor(
                 [x if torch.rand(1) > explore_prob else torch.randint(high=self.num_actions, size=(1,)).squeeze() for x in
-                 best_actions]).cuda()
+                 best_actions])
+            if self.bg.in_cuda:
+                chose_actions = chose_actions.cuda()
             chose_actions += self.action_mask
+            if self.bg.in_cuda:
+                chose_actions = chose_actions.cuda()
 
             actions = batch_legal_actions[chose_actions]
 
@@ -122,7 +127,7 @@ class test_summary:
             # if episode_max_gains[-1] < episode_gains[-1]:
             #     print(i)
             #     print(self.episodes[i].reward_seq)
-        print('Avg value of initial S:', np.mean(self.S))
+        print('Avg value of initial S:', torch.mean(self.S).item())
         print('Avg episode end value:', np.mean(episode_gains))
         print('Avg episode best value:', np.mean(episode_max_gains))
         print('Avg episode step budget(Avg/Max/Min):', np.mean(episode_max_gain_steps), np.max(episode_max_gain_steps), np.min(episode_max_gain_steps))
@@ -131,4 +136,4 @@ class test_summary:
         print('Avg percentage episode gain:', 1 - self.trial_num * sum(episode_gains) / sum(self.S).item())  #np.mean(episode_gain_ratios))
         print('Avg percentage max gain:', 1 - self.trial_num * sum(episode_max_gains) / sum(self.S).item())  #np.mean(episode_max_gain_ratios))
         print('Percentage of instances with positive gain:', len([x for x in episode_max_gains if x > 0]) / self.batch_size)
-        return np.mean(self.S) - np.mean(episode_gains)
+        return torch.mean(self.S).item() - np.mean(episode_gains)

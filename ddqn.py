@@ -134,7 +134,11 @@ class DQN:
         self.log.add_log('tot_return')
         self.log.add_log('Q_error')
         self.log.add_log('entropy')
-        self.log.add_log('R_signal')
+        self.log.add_log('R_signal_posi_len')
+        self.log.add_log('R_signal_nega_len')
+        self.log.add_log('R_signal_posi_mean')
+        self.log.add_log('R_signal_nega_mean')
+        self.log.add_log('R_signal_nonzero')
 
     def _updata_lr(self, step, max_lr, min_lr, decay_step):
         for g in self.optimizer.param_groups:
@@ -152,6 +156,7 @@ class DQN:
             perm_weight(bg)
 
         num_actions = get_legal_actions(states=bg, action_type=action_type, action_dropout=self.action_dropout).shape[0]
+        num_actions //= bg.batch_size
 
         action_mask = torch.tensor(range(0, num_actions * batch_size, num_actions))
         if self.cuda_flag:
@@ -173,10 +178,13 @@ class DQN:
             _, _, _, Q_sa = self.model(bg, batch_legal_actions, action_type=action_type, gnn_step=gnn_step)
 
             best_actions = Q_sa.view(-1, num_actions).argmax(dim=1)
-
             explore_episode_indices = explore_replace_mask[explore_step_offset[t]: explore_step_offset[t + 1]][:, 1]
             explore_actions = explore_replace_actions[explore_step_offset[t]: explore_step_offset[t + 1]]
             best_actions[explore_episode_indices] = explore_actions
+
+
+
+
             best_actions += action_mask
 
             actions = batch_legal_actions[best_actions]
@@ -264,7 +272,7 @@ class DQN:
 
         # generate new start states
         if target_bg is None:
-            new_graphs = un_batch(self.graph_generator.generate_graph(batch_size=self.new_epi_batch_size), copy=False)
+            new_graphs = un_batch(self.graph_generator.generate_graph(batch_size=self.new_epi_batch_size, cuda_flag=self.cuda_flag), copy=False)
         else:
             assert target_bg.in_cuda == self.cuda_flag
             new_graphs = dc(target_bg)
@@ -293,7 +301,6 @@ class DQN:
         #       range(self.buf_epi_len - 1)]))
         #
         # batch_legal_actions = self.prune_actions(bg, recent_states)
-
 
         batch_legal_actions = get_legal_actions(states=bg, action_type=self.action_type, action_dropout=self.action_dropout)
         if verbose:
@@ -402,10 +409,15 @@ class DQN:
             sample_buffer = [self.cascade_replay_buffer[indices // nc][indices % nc] for indices in selected_indices]
         else:
             if False:
+
+                nc = len(self.cascade_replay_buffer[0])
+                # importance sampling according to nonzero reward
+                sample_weight = torch.tensor(list(itertools.chain(*[[self.cascade_replay_buffer[i][j].r for j in range(nc)] for i in range(self.buf_epi_len)])))
+                sample_weight[sample_weight.nonzero()] += 100
+                sample_weight += 1
                 # importance sampling according to S
-                nc = self.cascade_buffer_kcut_value.shape[1]
-                print('sample weight:', torch.sum(1.0 / self.cascade_buffer_kcut_value ** 2, dim=1))
-                selected_indices = torch.multinomial((1.0 / self.cascade_buffer_kcut_value.flatten() ** 2), batch_size)
+                # sample_weight = 1.0 / self.cascade_buffer_kcut_value ** 2
+                selected_indices = torch.multinomial(sample_weight, batch_size)
                 sample_buffer = [self.cascade_replay_buffer[indices // nc][indices % nc] for indices in
                                  selected_indices]
             else:
@@ -432,6 +444,13 @@ class DQN:
         # g1 = [g for g in dgl.unbatch(dc(bg))]  # after_state
 
         R = [tpl.r.unsqueeze(0) for tpl in sample_buffer]
+
+        a = torch.cat(R)
+        self.log.add_item('R_signal_nonzero', sum(torch.abs(a)>1e-8).item())
+        self.log.add_item('R_signal_posi_len', len(a[a > 0]))
+        self.log.add_item('R_signal_nega_len', len(a[a < 0]))
+        self.log.add_item('R_signal_posi_mean', sum(a[a > 0]) / len(a[a > 0]))
+        self.log.add_item('R_signal_nega_mean', sum(a[a < 0]) / len(a[a < 0]))
 
         if rollout_step:
             rollout_R = torch.cat([tpl.rollout_r.unsqueeze(0) for tpl in sample_buffer])
@@ -476,7 +495,7 @@ class DQN:
 
 
         L = torch.pow(R + Q, 2).sum()
-        L.backward(retain_graph=True)
+        L.backward(retain_graph=False)
 
         self.Q_err += L.item()
 
@@ -515,7 +534,7 @@ class DQN:
                 self.run_batch_episode(target_bg=target_bg, action_type=self.action_type, gnn_step=gnn_step, episode_len=self.buf_epi_len,
                                    batch_size=self.new_epi_batch_size, rollout_step=rollout_step)
             else:
-                self.run_cascade_episode(target_bg=target_bg, action_type=self.action_type, gnn_step=gnn_step, q_step=q_step, rollout_step=rollout_step)
+                self.run_cascade_episode(target_bg=target_bg, action_type=self.action_type, gnn_step=gnn_step, rollout_step=rollout_step)
             T4 = time.time()
             # trim experience replay buffer
             self.trim_replay_buffer(epoch)
